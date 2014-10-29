@@ -69,8 +69,8 @@ LD=$(CXX) $(OPT) $(MARCH)
 INCLUDE=-I. -Icore $(EXR_INCLUDES) $(TIFF_INCLUDES)
 WARN=-Wall
 CWD=$(shell pwd)
-CXXFLAGS=$(OPT) $(MARCH) $(INCLUDE) $(WARN) $(DEFS) -std=c++1y -MMD
-CCFLAGS=$(OPT) $(MARCH) $(INCLUDE) $(WARN) $(DEFS) -std=c11 -MMD
+CXXFLAGS=$(OPT) $(MARCH) $(INCLUDE) $(WARN) $(DEFS) -std=c++1y
+CCFLAGS=$(OPT) $(MARCH) $(INCLUDE) $(WARN) $(DEFS) -std=c11
 LIBS=$(LEXLIB) $(EXR_LIBDIR) $(EXRLIBS) -lm 
 
 LIB_CSRCS=core/targa.c
@@ -211,4 +211,4 @@ $(RENDERER_BINARY): $(RENDERER_OBJS) $(CORE_LIB)
 clean:
 	rm -f objs/* bin/* core/pbrtlex.[ch]* core/pbrtparse.[ch]*
 
--include $(LIBOBJS:.o=.d)
+#-include $(LIBOBJS:.o=.d)
