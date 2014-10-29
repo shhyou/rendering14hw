@@ -1,3 +1,6 @@
+# Dependency file
+*.d
+
 # Compiled Object files
 *.slo
 *.lo
