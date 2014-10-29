@@ -91,7 +91,7 @@ ifeq ($(HAVE_LIBTIFF),1)
     TOOLS += bin/exrtotiff
 endif
 
-default: dirs bin/pbrt $(TOOLS)
+default: dirs bin/pbrt.exe $(TOOLS)
 
 bin/%: dirs
 
@@ -177,7 +177,7 @@ objs/tools_%.o: tools/%.cpp
 	@echo "Building object $@"
 	@$(CXX) $(CXXFLAGS) -o $@ -c $<
 
-bin/pbrt: objs/main_pbrt.o objs/libpbrt.a
+bin/pbrt.exe: objs/main_pbrt.o objs/libpbrt.a
 	@echo "Linking $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LIBS)
 
