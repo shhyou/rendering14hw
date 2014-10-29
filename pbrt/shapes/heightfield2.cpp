@@ -106,7 +106,7 @@ inline static bool jiao_tri(
 
   *tHit = t;
 
-  return 0<=alpha && alpha<=1 && 0<=beta && beta<=1;
+  return 0<=alpha && alpha<=1 && 0<=beta && beta<=1 && alpha+beta<=1;
 }
 
 bool Heightfield2::Intersect(
@@ -172,6 +172,8 @@ bool Heightfield2::Intersect(
   const Transform &o2w = *ObjectToWorld;
   *dg = { o2w(p), o2w(dpdu), o2w(dpdv), o2w(dndu), o2w(dndv), p.x, p.y, this };
   dg->dudx = 1;
+  dg->dudy = 0;
+  dg->dvdx = 0;
   dg->dvdy = 1;
 
 //  puts("F");
