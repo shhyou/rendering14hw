@@ -177,11 +177,11 @@ public:
     }
     friend inline
     CoefficientSpectrum operator*(float a, const CoefficientSpectrum &s) {
-        Assert(!isnan(a) && !s.HasNaNs());
+        Assert(!std::isnan(a) && !s.HasNaNs());
         return s * a;
     }
     CoefficientSpectrum operator/(float a) const {
-        Assert(!isnan(a));
+        Assert(!std::isnan(a));
         CoefficientSpectrum ret = *this;
         for (int i = 0; i < nSamples; ++i)
             ret.c[i] /= a;
@@ -189,7 +189,7 @@ public:
         return ret;
     }
     CoefficientSpectrum &operator/=(float a) {
-        Assert(!isnan(a));
+        Assert(!std::isnan(a));
         for (int i = 0; i < nSamples; ++i)
             c[i] /= a;
         return *this;
@@ -237,7 +237,7 @@ public:
     }
     bool HasNaNs() const {
         for (int i = 0; i < nSamples; ++i)
-            if (isnan(c[i])) return true;
+            if (std::isnan(c[i])) return true;
         return false;
     }
     bool Write(FILE *f) const {

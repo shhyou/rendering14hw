@@ -733,14 +733,14 @@ void MLTTask::Run() {
         // Splat current and proposed samples to _Film_
         PBRT_MLT_STARTED_SAMPLE_SPLAT();
         if (I[current] > 0.f) {
-            if (!isinf(1.f / I[current])) {
+            if (!std::isinf(1.f / I[current])) {
             Spectrum contrib =  (b / nPixelSamples) * L[current] / I[current];
             camera->film->Splat(samples[current].cameraSample,
                                 (1.f - a) * contrib);
         }
         }
         if (I[proposed] > 0.f) {
-            if (!isinf(1.f / I[proposed])) {
+            if (!std::isinf(1.f / I[proposed])) {
             Spectrum contrib =  (b / nPixelSamples) * L[proposed] / I[proposed];
             camera->film->Splat(samples[proposed].cameraSample,
                                 a * contrib);

@@ -88,7 +88,7 @@ struct Distribution1D {
 
         // Compute offset along CDF segment
         float du = (u - cdf[offset]) / (cdf[offset+1] - cdf[offset]);
-        Assert(!isnan(du));
+        Assert(!std::isnan(du));
 
         // Compute PDF for sampled offset
         if (pdf) *pdf = func[offset] / funcInt;

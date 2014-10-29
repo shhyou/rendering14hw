@@ -49,8 +49,8 @@ static void legendrep(float x, int lmax, float *out) {
     for (int l = 2; l <= lmax; ++l)
     {
         P(l, 0) = ((2*l-1)*x*P(l-1,0) - (l-1)*P(l-2,0)) / l;
-        Assert(!isnan(P(l, 0)));
-        Assert(!isinf(P(l, 0)));
+        Assert(!std::isnan(P(l, 0)));
+        Assert(!std::isinf(P(l, 0)));
     }
 
     // Compute $m=l$ edge using Legendre recurrence
@@ -60,8 +60,8 @@ static void legendrep(float x, int lmax, float *out) {
     float xpow = xroot;
     for (int l = 1; l <= lmax; ++l) {
         P(l, l) = neg * dfact * xpow;
-        Assert(!isnan(P(l, l)));
-        Assert(!isinf(P(l, l)));
+        Assert(!std::isnan(P(l, l)));
+        Assert(!std::isinf(P(l, l)));
         neg *= -1.f;      // neg = (-1)^l
         dfact *= 2*l + 1; // dfact = (2*l-1)!!
         xpow *= xroot;    // xpow = powf(1.f - x*x, float(l) * 0.5f);
@@ -71,8 +71,8 @@ static void legendrep(float x, int lmax, float *out) {
     for (int l = 2; l <= lmax; ++l)
     {
         P(l, l-1) = x * (2*l-1) * P(l-1, l-1);
-        Assert(!isnan(P(l, l-1)));
-        Assert(!isinf(P(l, l-1)));
+        Assert(!std::isnan(P(l, l-1)));
+        Assert(!std::isinf(P(l, l-1)));
     }
 
     // Compute $m=1, \ldots, l-2$ values using Legendre recurrence
@@ -81,8 +81,8 @@ static void legendrep(float x, int lmax, float *out) {
         {
             P(l, m) = ((2 * (l-1) + 1) * x * P(l-1,m) -
                        (l-1+m) * P(l-2,m)) / (l - m);
-            Assert(!isnan(P(l, m)));
-            Assert(!isinf(P(l, m)));
+            Assert(!std::isnan(P(l, m)));
+            Assert(!std::isinf(P(l, m)));
         }
     #if 0
         // wrap up with the negative m ones now
@@ -204,15 +204,15 @@ void SHEvaluate(const Vector &w, int lmax, float *out) {
         {
             out[SHIndex(l, m)] = sqrt2 * Klm[SHIndex(l, m)] *
                 out[SHIndex(l, -m)] * sins[-m];
-            Assert(!isnan(out[SHIndex(l,m)]));
-            Assert(!isinf(out[SHIndex(l,m)]));
+            Assert(!std::isnan(out[SHIndex(l,m)]));
+            Assert(!std::isinf(out[SHIndex(l,m)]));
         }
         out[SHIndex(l, 0)] *= Klm[SHIndex(l, 0)];
         for (int m = 1; m <= l; ++m)
         {
             out[SHIndex(l, m)] *= sqrt2 * Klm[SHIndex(l, m)] * coss[m];
-            Assert(!isnan(out[SHIndex(l,m)]));
-            Assert(!isinf(out[SHIndex(l,m)]));
+            Assert(!std::isnan(out[SHIndex(l,m)]));
+            Assert(!std::isinf(out[SHIndex(l,m)]));
         }
     }
 }

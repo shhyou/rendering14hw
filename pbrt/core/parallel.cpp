@@ -257,14 +257,14 @@ RWMutex::RWMutex() {
 
     hReadyToRead = CreateEvent(NULL, TRUE, FALSE, NULL);
     if (hReadyToRead == NULL) {
-        Severe("Error creating event for RWMutex: %d", GetLastError());
+        Severe("Error creating event for RWMutex: %lu", GetLastError());
     }
 
     hReadyToWrite = CreateSemaphore(NULL, 0, 1, NULL);
     if (hReadyToWrite == NULL) {
         DWORD lastError = GetLastError();
         CloseHandle(hReadyToRead);
-        Severe("Error creating semaphore for RWMutex: %d", lastError);
+        Severe("Error creating semaphore for RWMutex: %lu", lastError);
     }
 }
 
@@ -493,7 +493,7 @@ Semaphore::Semaphore() {
 Semaphore::Semaphore() {
     handle = CreateSemaphore(NULL, 0, LONG_MAX,  NULL);
     if (!handle)
-        Severe("Error from CreateSemaphore: %d", GetLastError());
+        Severe("Error from CreateSemaphore: %lu", GetLastError());
 }
 
 
@@ -554,7 +554,7 @@ void Semaphore::Post(int count) {
 #if defined(PBRT_IS_WINDOWS)
 void Semaphore::Wait() {
     if (WaitForSingleObject(handle, INFINITE) == WAIT_FAILED)
-        Severe("Error from WaitForSingleObject: %d", GetLastError());
+        Severe("Error from WaitForSingleObject: %lu", GetLastError());
 
 }
 
@@ -570,7 +570,7 @@ bool Semaphore::TryWait() {
 #if defined(PBRT_IS_WINDOWS)
 void Semaphore::Post(int count) {
     if (!ReleaseSemaphore(handle, count, NULL))
-        Severe("Error from ReleaseSemaphore: %d", GetLastError());
+        Severe("Error from ReleaseSemaphore: %lu", GetLastError());
 }
 
 

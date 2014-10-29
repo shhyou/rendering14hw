@@ -94,7 +94,7 @@ float Shape::Pdf(const Point &p, const Vector &wi) const {
     // Convert light sample weight to solid angle measure
     float pdf = DistanceSquared(p, ray(thit)) /
                 (AbsDot(dgLight.nn, -wi) * Area());
-    if (isinf(pdf)) pdf = 0.f;
+    if (std::isinf(pdf)) pdf = 0.f;
     return pdf;
 }
 

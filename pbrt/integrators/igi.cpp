@@ -209,7 +209,7 @@ Spectrum IGIIntegrator::Li(const Scene *scene, const Renderer *renderer,
                 // Add bias compensation ray contribution to radiance sum
                 float Ggather = AbsDot(wi, n) * AbsDot(-wi, gatherIsect.dg.nn) /
                     DistanceSquared(p, gatherIsect.dg.p);
-                if (Ggather - gLimit > 0.f && !isinf(Ggather)) {
+                if (Ggather - gLimit > 0.f && !std::isinf(Ggather)) {
                     float gs = (Ggather - gLimit) / Ggather;
                     L += f * Li * (AbsDot(wi, n) * gs / (nSamples * pdf));
                 }

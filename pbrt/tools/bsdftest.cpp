@@ -214,7 +214,7 @@ int main(int argc, char *argv[])
 
                 if (!validSample) {
                     outsideSamples++;
-                } else if (pdf == 0.f || isnan(pdf) || redF < 0 || isnan(redF)) {
+                } else if (pdf == 0.f || std::isnan(pdf) || redF < 0 || std::isnan(redF)) {
                     if (badSamples == warningTarget) {
                         fprintf(stderr, "warning %d, bad sample %d! "
                             "pdf: %.3f, redF: %.3f\n",

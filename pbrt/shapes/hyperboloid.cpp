@@ -58,7 +58,7 @@ Hyperboloid::Hyperboloid(const Transform *o2w, const Transform *w2o, bool ro,
         a = (1.f/xy1 - (pp.z*pp.z)/(xy1*p2.z*p2.z)) /
             (1 - (xy2*pp.z*pp.z)/(xy1*p2.z*p2.z));
         c = (a * xy2 - 1) / (p2.z*p2.z);
-    } while (isinf(a) || isnan(a));
+    } while (std::isinf(a) || std::isnan(a));
 }
 
 

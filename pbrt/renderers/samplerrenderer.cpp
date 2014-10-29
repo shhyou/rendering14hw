@@ -126,7 +126,7 @@ void SamplerRendererTask::Run() {
                       "for image sample.  Setting to black.", Ls[i].y());
                 Ls[i] = Spectrum(0.f);
             }
-            else if (isinf(Ls[i].y())) {
+            else if (std::isinf(Ls[i].y())) {
                 Error("Infinite luminance value returned "
                       "for image sample.  Setting to black.");
                 Ls[i] = Spectrum(0.f);
