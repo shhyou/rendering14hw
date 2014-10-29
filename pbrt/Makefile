@@ -95,7 +95,7 @@ default: dirs bin/pbrt $(TOOLS)
 
 bin/%: dirs
 
-pbrt: bin/pbrt
+pbrt: bin/pbrt.exe
 
 dirs:
 	/bin/mkdir -p bin objs
