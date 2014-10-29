@@ -32,51 +32,159 @@
 // shapes/heightfield2.cpp*
 #include "stdafx.h"
 #include "shapes/heightfield2.h"
-#include "shapes/trianglemesh.h"
+#include "core/geometry.h"
+#include "core/transform.h"
 #include "paramset.h"
 
 #include <stdexcept>
+#include <limits>
+#include <vector>
+
+using std::vector;
+
+struct Heightfield2_impl {
+  float *z;
+  int nx, ny;
+  int www;
+};
 
 // Heightfield2 Method Definitions
 Heightfield2::Heightfield2(const Transform *o2w, const Transform *w2o,
     bool ro, int x, int y, const float *zs)
   : Shape(o2w, w2o, ro) {
-  nx = x;
-  ny = y;
-  z = new float[nx*ny];
-  memcpy(z, zs, nx*ny*sizeof(float));
+  impl = new Heightfield2_impl;
+  impl->nx = x;
+  impl->ny = y;
+  impl->z = new float[impl->nx*impl->ny];
+  memcpy(impl->z, zs, impl->nx*impl->ny*sizeof(float));
 }
 
 
 Heightfield2::~Heightfield2() {
-  delete[] z;
+  delete[] impl->z;
+  delete impl;
 }
 
 
 BBox Heightfield2::ObjectBound() const {
-  float minz = z[0], maxz = z[0];
-  for (int i = 1; i < nx*ny; ++i) {
-    if (z[i] < minz) minz = z[i];
-    if (z[i] > maxz) maxz = z[i];
+  float minz = impl->z[0], maxz = impl->z[0];
+  for (int i = 1; i < impl->nx*impl->ny; ++i) {
+    if (impl->z[i] < minz) minz = impl->z[i];
+    if (impl->z[i] > maxz) maxz = impl->z[i];
   }
   return BBox(Point(0,0,minz), Point(1,1,maxz));
 }
 
 
-void Heightfield2::Refine(vector<Reference<Shape> > &) const { throw std::runtime_error("Heightfield2::Refine"); }
+void Heightfield2::Refine(vector<Reference<Shape>> &) const { throw std::runtime_error("Heightfield2::Refine"); }
+
+static const float EPS = 1e-9;
+
+inline static bool jiao_tri(
+  const Ray &ray,
+  const Point& pt0,
+  const Point& pt1,
+  const Point& pt2,
+  float* tHit)
+{
+  const Vector u {pt1 - pt0}, w {pt2 - pt0};
+  const Vector n {Cross(u, w)};
+  const float deno = Dot(n, ray.d);
+
+  if (-EPS<deno && deno<EPS)
+    return false;
+
+  const float nume = Dot(n, pt0-ray.o);
+  const float t = nume/deno;
+  if (t < ray.mint || t > ray.maxt)
+    return false;
+
+  const Vector v {ray(t) - pt0};
+  float alpha, beta, A[2][2] {{u.x, w.x},{u.y, w.y}}, B[2] {v.x, v.y};
+  if (!SolveLinearSystem2x2(A, B, &alpha, &beta))
+    return false;
+
+  *tHit = t;
+
+  return 0<=alpha && alpha<=1 && 0<=beta && beta<=1;
+}
 
 bool Heightfield2::Intersect(
-  const Ray &ray,
+  const Ray &r,
   float *tHit,
   float *rayEpsilon,
   DifferentialGeometry *dg) const
 {
-  return false;
-}
-bool Heightfield2::IntersectP(const Ray &ray) const {
-  return false;
+  vector<vector<Point>> pt;
+  for (int y = 0; y < impl->ny-1; ++y) {
+    pt.push_back({});
+    for (int x = 0; x < impl->nx-1; ++x) {
+      pt.back().emplace_back( static_cast<float>(x)/(impl->nx-1)
+                            , static_cast<float>(y)/(impl->ny-1)
+                            , impl->z[y*impl->ny + x] );
+    }
+  }
+
+  Ray ray;
+  (*WorldToObject)(r, &ray);
+
+  bool hit = false;
+  float tmin = std::numeric_limits<float>::max()  ;
+  int argtri[3][2];
+  for (int y = 0; y < impl->ny-1; ++y) {
+    for (int x = 0; x < impl->nx-1; ++x) {
+      float t;
+      if (jiao_tri(ray, pt[y][x], pt[y][x+1], pt[y+1][x+1], &t)) {
+        hit = true;
+        if (t < tmin) {
+          tmin = t;
+          argtri[0][0] = x;   argtri[0][1] = y;
+          argtri[1][0] = x+1; argtri[1][1] = y;
+          argtri[2][0] = x+1; argtri[2][1] = y+1;
+        }
+      }
+      if (jiao_tri(ray, pt[y][x], pt[y+1][x+1], pt[y+1][x], &t)) {
+        hit = true;
+        if (t < tmin) {
+          tmin = t;
+          argtri[0][0] = x;   argtri[0][1] = y;
+          argtri[1][0] = x+1; argtri[1][1] = y+1;
+          argtri[2][0] = x; argtri[2][1] = y+1;
+        }
+      }
+    }
+  }
+  if (!hit) return false;
+
+  const Point p {ray(tmin)};
+  const Vector dpdu{1,0,0}, dpdv{0,1,0};
+  const Vector n {Normalize(Cross(dpdu,dpdv))};
+  Normal dndu, dndv;
+
+  const Transform &o2w = *ObjectToWorld;
+  *dg = { o2w(p), o2w(dpdu), o2w(dpdv), o2w(dndu), o2w(dndv), p.x, p.y, this };
+  dg->dudx = 1;
+  dg->dvdy = 1;
+
+  *tHit = tmin;
+  *rayEpsilon = 1e-3f * tmin;
+  return true;
 }
 
+
+bool Heightfield2::IntersectP(const Ray &ray) const {
+  float tHit, rayEpsilon;
+  DifferentialGeometry dg;
+  return this->Intersect(ray, &tHit, &rayEpsilon, &dg);
+}
+
+void Heightfield2::GetShadingGeometry(
+  const Transform &obj2world,
+  const DifferentialGeometry &dg,
+  DifferentialGeometry *dgShading) const
+{
+  *dgShading = dg;
+}
 
 Heightfield2 *CreateHeightfieldShape2(
   const Transform *o2w,
