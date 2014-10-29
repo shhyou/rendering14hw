@@ -115,24 +115,27 @@ bool Heightfield2::Intersect(
   float *rayEpsilon,
   DifferentialGeometry *dg) const
 {
+//  puts("A");
   vector<vector<Point>> pt;
-  for (int y = 0; y < impl->ny-1; ++y) {
+  for (int y = 0; y < impl->ny; ++y) {
     pt.push_back({});
-    for (int x = 0; x < impl->nx-1; ++x) {
+    for (int x = 0; x < impl->nx; ++x) {
       pt.back().emplace_back( static_cast<float>(x)/(impl->nx-1)
                             , static_cast<float>(y)/(impl->ny-1)
-                            , impl->z[y*impl->ny + x] );
+                            , impl->z[y*impl->nx + x] );
     }
   }
 
   Ray ray;
   (*WorldToObject)(r, &ray);
 
+//  puts("B");
   bool hit = false;
   float tmin = std::numeric_limits<float>::max()  ;
-  int argtri[3][2];
+  int argtri[3][2]={{0,0},{0,0},{0,0}};
   for (int y = 0; y < impl->ny-1; ++y) {
     for (int x = 0; x < impl->nx-1; ++x) {
+//      printf("y=%d,x=%d\n",y,x);
       float t;
       if (jiao_tri(ray, pt[y][x], pt[y][x+1], pt[y+1][x+1], &t)) {
         hit = true;
@@ -154,20 +157,27 @@ bool Heightfield2::Intersect(
       }
     }
   }
+//  printf("C: hit=%d",hit);
   if (!hit) return false;
 
+//  puts("D");
   const Point p {ray(tmin)};
-  const Vector dpdu{1,0,0}, dpdv{0,1,0};
+  const Vector ntri {Cross( pt[argtri[1][1]][argtri[1][0]]-pt[argtri[0][1]][argtri[0][0]]
+                          , pt[argtri[2][1]][argtri[2][0]]-pt[argtri[0][1]][argtri[0][0]] )};
+  const Vector dpdu {1,0,-ntri.x/ntri.z}, dpdv {0,1,-ntri.y/ntri.z};
   const Vector n {Normalize(Cross(dpdu,dpdv))};
-  Normal dndu, dndv;
+  Normal dndu {0,0,0}, dndv {0,0,0};
 
+//  puts("E");
   const Transform &o2w = *ObjectToWorld;
   *dg = { o2w(p), o2w(dpdu), o2w(dpdv), o2w(dndu), o2w(dndv), p.x, p.y, this };
   dg->dudx = 1;
   dg->dvdy = 1;
 
+//  puts("F");
   *tHit = tmin;
   *rayEpsilon = 1e-3f * tmin;
+//  puts("G");
   return true;
 }
 
