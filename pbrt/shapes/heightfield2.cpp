@@ -99,6 +99,26 @@ void Heightfield2::Refine(vector<Reference<Shape>> &) const { throw std::runtime
 
 static const float EPS = 1e-9;
 
+inline static bool jiao_plane(
+  const Ray &ray,
+  const Point& pt0,
+  const Vector& n,
+  float *tHit)
+{
+  const float deno = Dot(n, ray.d);
+
+  if (-EPS<deno && deno<EPS)
+    return false;
+
+  const float nume = Dot(n, pt0-ray.o);
+  const float t = nume/deno;
+  if (t < ray.mint || t > ray.maxt)
+    return false;
+
+  *tHit = t;
+  return true;
+}
+
 inline static bool jiao_tri(
   const Heightfield2_impl *impl,
   const Ray &ray,
@@ -110,14 +130,8 @@ inline static bool jiao_tri(
             , &pt2 = impl->pt[COORD(_pt[2].first, _pt[2].second)];
   const Vector u {pt1 - pt0}, w {pt2 - pt0};
   const Vector n {Cross(u, w)};
-  const float deno = Dot(n, ray.d);
-
-  if (-EPS<deno && deno<EPS)
-    return false;
-
-  const float nume = Dot(n, pt0-ray.o);
-  const float t = nume/deno;
-  if (t < ray.mint || t > ray.maxt)
+  float t;
+  if (!jiao_plane(ray, pt0, n, &t))
     return false;
 
   const Vector v {ray(t) - pt0};
@@ -144,21 +158,69 @@ bool Heightfield2::Intersect(
 
 //  puts("B");
   bool hit = false;
-  float tmin = std::numeric_limits<float>::max()  ;
-  int argtri[2];
-  for (int y = 0; y < impl->ny-1; ++y) {
+  float tmin = std::numeric_limits<float>::max();
+  int argtri[2] {0,0};
+
+  const float dy = 1.0/(impl->ny - 1);
+  if (-EPS<ray.d.y && ray.d.y<EPS) { // horizontal
+    float y = 0;
+    int yidx;
+    for (yidx = 0; yidx < impl->ny-1; ++yidx, y += dy)
+      if (y<=ray.o.y && ray.o.y<=y+dy) break;
     for (int xidx = 0; xidx < 2*(impl->nx-1); ++xidx) {
       float t;
-      if (jiao_tri(this->impl, ray, tri[y][xidx], &t)) {
+      if (jiao_tri(this->impl, ray, tri[yidx][xidx], &t)) {
         hit = true;
         if (t < tmin) {
           tmin = t;
-          argtri[0] = y;
+          argtri[0] = yidx;
           argtri[1] = xidx;
         }
       }
     }
+  } else {
+    float t0, t1;
+    if (!jiao_plane(ray, Point{0,0,0}, Vector{0,1,0}, &t0)
+       || !jiao_plane(ray, Point{0,dy,0}, Vector{0,1,0}, &t1))
+      return false;
+    const float dt = t1 - t0;
+
+    float dx, x, tray = t0;
+    int ix, dix;
+    if (ray.d.x >= 0) {
+      dx = 1.0/(impl->nx-1);
+      x = 0;
+      ix = 0;
+      dix = 1;
+    } else {
+      dx = -1.0/(impl->nx-1);
+      x = 1 + dx;
+      ix = impl->nx-2;
+      dix = -1;
+    }
+    const float absdx = fabs(dx);
+    for (int yidx = 0; yidx < impl->ny-1; ++yidx, tray += dt) {
+      const float xtop = ray(tray+dt).x;
+      while (0 <= ix && ix < impl->nx-1) {
+        for (int k = 0; k < 2; ++k) {
+          float t;
+          if (jiao_tri(this->impl, ray, tri[yidx][2*ix+k], &t)) {
+            hit = true;
+            if (t < tmin) {
+              tmin = t;
+              argtri[0] = yidx;
+              argtri[1] = 2*ix+k;
+            }
+          }
+        }
+        if (x<=xtop && xtop<=x+absdx) break;
+        x += dx;
+        ix += dix;
+      }
+      if (ix<0 || ix>=impl->nx-1) break;
+    }
   }
+
 //  printf("C: hit=%d",hit);
   if (!hit) return false;
 
