@@ -41,12 +41,17 @@
 #include <vector>
 
 using std::vector;
+using std::array;
+using std::pair;
 
 struct Heightfield2_impl {
   float *z;
   int nx, ny;
-  int www;
+  vector<Point> pt;
+  vector<vector<vector<pair<int,int>>>> tri;
 };
+
+#define COORD(y,x) ((y)*impl->nx + (x))
 
 // Heightfield2 Method Definitions
 Heightfield2::Heightfield2(const Transform *o2w, const Transform *w2o,
@@ -57,6 +62,20 @@ Heightfield2::Heightfield2(const Transform *o2w, const Transform *w2o,
   impl->ny = y;
   impl->z = new float[impl->nx*impl->ny];
   memcpy(impl->z, zs, impl->nx*impl->ny*sizeof(float));
+  for (int y = 0; y < impl->ny; ++y) {
+    for (int x = 0; x < impl->nx; ++x) {
+      impl->pt.emplace_back( static_cast<float>(x)/(impl->nx-1)
+                           , static_cast<float>(y)/(impl->ny-1)
+                           , impl->z[COORD(y,x)] );
+    }
+  }
+  for (int y = 0; y < impl->ny; ++y) {
+    impl->tri.push_back({});
+    for (int x = 0; x < impl->nx; ++x) {
+      impl->tri.back().push_back({{y,x}, {y,x+1},   {y+1,x+1}});
+      impl->tri.back().push_back({{y,x}, {y+1,x+1}, {y+1,x}});
+    }
+  }
 }
 
 
@@ -81,12 +100,14 @@ void Heightfield2::Refine(vector<Reference<Shape>> &) const { throw std::runtime
 static const float EPS = 1e-9;
 
 inline static bool jiao_tri(
+  const Heightfield2_impl *impl,
   const Ray &ray,
-  const Point& pt0,
-  const Point& pt1,
-  const Point& pt2,
+  const vector<pair<int,int>>& _pt,
   float* tHit)
 {
+  const Point &pt0 = impl->pt[COORD(_pt[0].first, _pt[0].second)]
+            , &pt1 = impl->pt[COORD(_pt[1].first, _pt[1].second)]
+            , &pt2 = impl->pt[COORD(_pt[2].first, _pt[2].second)];
   const Vector u {pt1 - pt0}, w {pt2 - pt0};
   const Vector n {Cross(u, w)};
   const float deno = Dot(n, ray.d);
@@ -100,7 +121,8 @@ inline static bool jiao_tri(
     return false;
 
   const Vector v {ray(t) - pt0};
-  float alpha, beta, A[2][2] {{u.x, w.x},{u.y, w.y}}, B[2] {v.x, v.y};
+  float alpha, beta;
+  const float A[2][2] {{u.x, w.x},{u.y, w.y}}, B[2] {v.x, v.y};
   if (!SolveLinearSystem2x2(A, B, &alpha, &beta))
     return false;
 
@@ -116,43 +138,23 @@ bool Heightfield2::Intersect(
   DifferentialGeometry *dg) const
 {
 //  puts("A");
-  vector<vector<Point>> pt;
-  for (int y = 0; y < impl->ny; ++y) {
-    pt.push_back({});
-    for (int x = 0; x < impl->nx; ++x) {
-      pt.back().emplace_back( static_cast<float>(x)/(impl->nx-1)
-                            , static_cast<float>(y)/(impl->ny-1)
-                            , impl->z[y*impl->nx + x] );
-    }
-  }
-
+  vector<vector<vector<pair<int,int>>>> &tri = impl->tri;
   Ray ray;
   (*WorldToObject)(r, &ray);
 
 //  puts("B");
   bool hit = false;
   float tmin = std::numeric_limits<float>::max()  ;
-  int argtri[3][2]={{0,0},{0,0},{0,0}};
+  int argtri[2];
   for (int y = 0; y < impl->ny-1; ++y) {
-    for (int x = 0; x < impl->nx-1; ++x) {
-//      printf("y=%d,x=%d\n",y,x);
+    for (int xidx = 0; xidx < 2*(impl->nx-1); ++xidx) {
       float t;
-      if (jiao_tri(ray, pt[y][x], pt[y][x+1], pt[y+1][x+1], &t)) {
+      if (jiao_tri(this->impl, ray, tri[y][xidx], &t)) {
         hit = true;
         if (t < tmin) {
           tmin = t;
-          argtri[0][0] = x;   argtri[0][1] = y;
-          argtri[1][0] = x+1; argtri[1][1] = y;
-          argtri[2][0] = x+1; argtri[2][1] = y+1;
-        }
-      }
-      if (jiao_tri(ray, pt[y][x], pt[y+1][x+1], pt[y+1][x], &t)) {
-        hit = true;
-        if (t < tmin) {
-          tmin = t;
-          argtri[0][0] = x;   argtri[0][1] = y;
-          argtri[1][0] = x+1; argtri[1][1] = y+1;
-          argtri[2][0] = x; argtri[2][1] = y+1;
+          argtri[0] = y;
+          argtri[1] = xidx;
         }
       }
     }
@@ -160,20 +162,21 @@ bool Heightfield2::Intersect(
 //  printf("C: hit=%d",hit);
   if (!hit) return false;
 
+  const vector<pair<int,int>> &_pt = impl->tri[argtri[0]][argtri[1]];
 //  puts("D");
-  const Point p {ray(tmin)};
-  const Vector ntri {Cross( pt[argtri[1][1]][argtri[1][0]]-pt[argtri[0][1]][argtri[0][0]]
-                          , pt[argtri[2][1]][argtri[2][0]]-pt[argtri[0][1]][argtri[0][0]] )};
+  const Point p {ray(tmin)}
+            , &pt0 = impl->pt[COORD(_pt[0].first, _pt[0].second)]
+            , &pt1 = impl->pt[COORD(_pt[1].first, _pt[1].second)]
+            , &pt2 = impl->pt[COORD(_pt[2].first, _pt[2].second)];
+  const Vector ntri {Cross(pt1-pt0, pt2-pt0)};
   const Vector dpdu {1,0,-ntri.x/ntri.z}, dpdv {0,1,-ntri.y/ntri.z};
   const Vector n {Normalize(Cross(dpdu,dpdv))};
-  Normal dndu {0,0,0}, dndv {0,0,0};
+  const Normal dndu {0,0,0}, dndv {0,0,0};
 
 //  puts("E");
   const Transform &o2w = *ObjectToWorld;
   *dg = { o2w(p), o2w(dpdu), o2w(dpdv), o2w(dndu), o2w(dndv), p.x, p.y, this };
   dg->dudx = 1;
-  dg->dudy = 0;
-  dg->dvdx = 0;
   dg->dvdy = 1;
 
 //  puts("F");
@@ -212,5 +215,4 @@ Heightfield2 *CreateHeightfieldShape2(
   Assert(nu != -1 && nv != -1 && Pz != NULL);
   return new Heightfield2(o2w, w2o, reverseOrientation, nu, nv, Pz);
 }
-
 
