@@ -59,7 +59,7 @@ public:
     DifferentialGeometry *dgShading) const;
 private:
   // Heightfield2 Private Data
-  Heightfield2_impl *impl;
+  Heightfield2_impl * const impl;
 };
 
 

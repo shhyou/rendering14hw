@@ -36,6 +36,7 @@
 #include "core/transform.h"
 #include "paramset.h"
 
+#include <cassert>
 #include <stdexcept>
 #include <limits>
 #include <vector>
@@ -45,8 +46,10 @@ using std::array;
 using std::pair;
 
 struct Heightfield2_impl {
-  float *z;
-  int nx, ny;
+  const int nx, ny;
+  const float dx, dy;
+  float * const z, minz, maxz;
+  BBox bbox;
   vector<Point> pt;
   vector<vector<vector<pair<int,int>>>> tri;
 };
@@ -56,26 +59,31 @@ struct Heightfield2_impl {
 // Heightfield2 Method Definitions
 Heightfield2::Heightfield2(const Transform *o2w, const Transform *w2o,
     bool ro, int x, int y, const float *zs)
-  : Shape(o2w, w2o, ro) {
-  impl = new Heightfield2_impl;
-  impl->nx = x;
-  impl->ny = y;
-  impl->z = new float[impl->nx*impl->ny];
+  : Shape(o2w, w2o, ro),
+    impl(new Heightfield2_impl {x, y, 1.0f/(x - 1), 1.0f/(y - 1),
+                                new float[x*y]})
+{
   memcpy(impl->z, zs, impl->nx*impl->ny*sizeof(float));
-  for (int y = 0; y < impl->ny; ++y) {
-    for (int x = 0; x < impl->nx; ++x) {
-      impl->pt.emplace_back( static_cast<float>(x)/(impl->nx-1)
-                           , static_cast<float>(y)/(impl->ny-1)
-                           , impl->z[COORD(y,x)] );
-    }
-  }
-  for (int y = 0; y < impl->ny; ++y) {
+  ///////////////////////////////////////////////////////////////////
+  for (int y = 0; y < impl->ny; ++y)
+    for (int x = 0; x < impl->nx; ++x)
+      impl->pt.emplace_back( x*impl->dx, y*impl->dy, impl->z[COORD(y,x)] );
+  for (int y = 0; y < impl->ny-1; ++y) {
     impl->tri.push_back({});
-    for (int x = 0; x < impl->nx; ++x) {
+    for (int x = 0; x < impl->nx-1; ++x) {
       impl->tri.back().push_back({{y,x}, {y,x+1},   {y+1,x+1}});
       impl->tri.back().push_back({{y,x}, {y+1,x+1}, {y+1,x}});
     }
   }
+  ///////////////////////////////////////////////////////////////////
+  float minz = impl->z[0], maxz = impl->z[0];
+  for (int i = 1; i < impl->nx*impl->ny; ++i) {
+    if (impl->z[i] < minz) minz = impl->z[i];
+    if (impl->z[i] > maxz) maxz = impl->z[i];
+  }
+  impl->minz = minz;
+  impl->maxz = maxz;
+  impl->bbox = BBox(Point(0,0,impl->minz), Point(1,1,impl->maxz));
 }
 
 
@@ -86,38 +94,13 @@ Heightfield2::~Heightfield2() {
 
 
 BBox Heightfield2::ObjectBound() const {
-  float minz = impl->z[0], maxz = impl->z[0];
-  for (int i = 1; i < impl->nx*impl->ny; ++i) {
-    if (impl->z[i] < minz) minz = impl->z[i];
-    if (impl->z[i] > maxz) maxz = impl->z[i];
-  }
-  return BBox(Point(0,0,minz), Point(1,1,maxz));
+  return impl->bbox;
 }
 
 
 void Heightfield2::Refine(vector<Reference<Shape>> &) const { throw std::runtime_error("Heightfield2::Refine"); }
 
-static const float EPS = 1e-9;
-
-inline static bool jiao_plane(
-  const Ray &ray,
-  const Point& pt0,
-  const Vector& n,
-  float *tHit)
-{
-  const float deno = Dot(n, ray.d);
-
-  if (-EPS<deno && deno<EPS)
-    return false;
-
-  const float nume = Dot(n, pt0-ray.o);
-  const float t = nume/deno;
-  if (t < ray.mint || t > ray.maxt)
-    return false;
-
-  *tHit = t;
-  return true;
-}
+static const float EPS = 1e-10;
 
 inline static bool jiao_tri(
   const Heightfield2_impl *impl,
@@ -128,21 +111,34 @@ inline static bool jiao_tri(
   const Point &pt0 = impl->pt[COORD(_pt[0].first, _pt[0].second)]
             , &pt1 = impl->pt[COORD(_pt[1].first, _pt[1].second)]
             , &pt2 = impl->pt[COORD(_pt[2].first, _pt[2].second)];
-  const Vector u {pt1 - pt0}, w {pt2 - pt0};
-  const Vector n {Cross(u, w)};
-  float t;
-  if (!jiao_plane(ray, pt0, n, &t))
-    return false;
+  const Vector e1 = pt1 - pt0;
+  const Vector e2 = pt2 - pt0;
+  const Vector s1 = Cross(ray.d, e2);
+  const float divisor = Dot(s1, e1);
 
-  const Vector v {ray(t) - pt0};
-  float alpha, beta;
-  const float A[2][2] {{u.x, w.x},{u.y, w.y}}, B[2] {v.x, v.y};
-  if (!SolveLinearSystem2x2(A, B, &alpha, &beta))
+  if (divisor == 0.)
+      return false;
+  const float invDivisor = 1.f / divisor;
+
+  // Compute first barycentric coordinate
+  const Vector s = ray.o - pt0;
+  float b1 = Dot(s, s1) * invDivisor;
+  if (b1 < 0. || b1 > 1.)
+      return false;
+
+  // Compute second barycentric coordinate
+  Vector s2 = Cross(s, e1);
+  float b2 = Dot(ray.d, s2) * invDivisor;
+  if (b2 < 0. || b1 + b2 > 1.)
+      return false;
+
+  // Compute _t_ to intersection point
+  float t = Dot(e2, s2) * invDivisor;
+  if (t < ray.mint || t > ray.maxt)
     return false;
 
   *tHit = t;
-
-  return 0<=alpha && alpha<=1 && 0<=beta && beta<=1 && alpha+beta<=1;
+  return true;
 }
 
 bool Heightfield2::Intersect(
@@ -151,15 +147,124 @@ bool Heightfield2::Intersect(
   float *rayEpsilon,
   DifferentialGeometry *dg) const
 {
-//  puts("A");
+  Ray ray;
+  (*WorldToObject)(r, &ray);
+
+  Point pst;
+  const float d_inv[3] { 1.0f/ray.d.x, 1.0f/ray.d.y, 1.0f/ray.d.z };
+  if (impl->bbox.Inside(ray(ray.mint))) {
+//    printf("\nintersect: inside\n");
+    pst = ray(ray.mint);
+  } else {
+    bool hit = false;
+    float t0 = std::numeric_limits<float>::max();
+    for (int coord = 0; coord != 2; ++coord) {
+      for (int k = 0; k < 2; ++k) {
+        const float border = (k==0? impl->dx:impl->dy)/2;
+        const float t = ((coord? (1.0 - border) : border) - ray.o[k])*d_inv[k];
+        if (impl->bbox.Inside(ray(t)) && t<t0) {
+          t0 = t;
+          hit = true;
+        }
+      }
+    }
+    if (!hit)
+      return false;
+    pst = ray(t0);
+//    printf("\nintersect: at %f (%.8f,%.8f,%.8f)\n", t0, pst.x, pst.y, pst.z);
+  }
+
+//  printf("direction: (%f,%f,%f)\n", ray.d.x, ray.d.y, ray.d.z);
+
+  int coord[2] { static_cast<int>(pst.y * (impl->ny-1) + EPS)
+               , static_cast<int>(pst.x * (impl->nx-1) + EPS) };
+
+  int argtri[2] {0,0};
+
+  const float t_step[2] { static_cast<float>(fabs(impl->dy * d_inv[1]))
+                        , static_cast<float>(fabs(impl->dx * d_inv[0])) };
+  float t_nxt[2];
+  int coord_step[2];
+
+  for (int k = 0; k != 2; ++k) {
+    const float d = k==0? impl->dy : impl->dx;
+    if (ray.d[1-k] >= 0) {
+      t_nxt[k] = ((coord[k]+1)*d - ray.o[1-k]) * d_inv[1-k];
+      coord_step[k] = 1;
+    } else {
+      t_nxt[k] = (coord[k]*d - ray.o[1-k]) * d_inv[1-k];
+      coord_step[k] = -1;
+    }
+  }
+
+  bool hit = false;
+  float tmin = std::numeric_limits<float>::max();
+
+  do {
+//    printf("at (%d,%d) in (%d,%d)\n", coord[0], coord[1], impl->ny-1, impl->nx-1);
+    for (int k = 0; k < 2; ++k) {
+      float t;
+      if (jiao_tri(impl, ray, impl->tri[coord[0]][coord[1]*2 + k], &t)) {
+        hit = true;
+        if (t < tmin) {
+          tmin = t;
+          argtri[0] = coord[0];
+          argtri[1] = coord[1]*2+k;
+        }
+      }
+    }
+    if (hit || (t_nxt[0]>ray.maxt && t_nxt[1]>ray.maxt)) break;
+    if (t_nxt[0] <= t_nxt[1]) {
+      coord[0] += coord_step[0];
+      t_nxt[0] += t_step[0];
+    } else {
+      coord[1] += coord_step[1];
+      t_nxt[1] += t_step[1];
+    }
+  } while (0<=coord[0] && coord[0]<impl->ny-1
+        && 0<=coord[1] && coord[1]<impl->nx-1);
+
+  if (!hit) return false;
+
+  const vector<pair<int,int>> &_pt = impl->tri[argtri[0]][argtri[1]];
+  const Point p {ray(tmin)}
+            , &pt0 = impl->pt[COORD(_pt[0].first, _pt[0].second)]
+            , &pt1 = impl->pt[COORD(_pt[1].first, _pt[1].second)]
+            , &pt2 = impl->pt[COORD(_pt[2].first, _pt[2].second)];
+  const Vector ntri {Cross(pt1-pt0, pt2-pt0)};
+  const float inv_z = 1.0/ntri.z;
+  const Vector dpdu {1,0,-ntri.x/inv_z}, dpdv {0,1,-ntri.y/inv_z};
+  const Vector n {Cross(dpdu,dpdv)};
+  const static Normal dndu {0,0,0}, dndv {0,0,0};
+
+  const Transform &o2w = *ObjectToWorld;
+  *dg = { o2w(p), o2w(dpdu), o2w(dpdv), o2w(dndu), o2w(dndv), p.x, p.y, this };
+  dg->dudx = 1;
+  dg->dvdy = 1;
+
+  *tHit = tmin;
+  *rayEpsilon = 1e-3f * tmin;
+  return true;
+}
+
+
+#if 1
+
+bool Heightfield2::IntersectP(const Ray &ray) const {
+  float tHit, rayEpsilon;
+  DifferentialGeometry dg;
+  return this->Intersect(ray, &tHit, &rayEpsilon, &dg);
+}
+
+#else
+
+bool Heightfield2::IntersectP(const Ray &r) const {
   vector<vector<vector<pair<int,int>>>> &tri = impl->tri;
   Ray ray;
   (*WorldToObject)(r, &ray);
 
-//  puts("B");
   bool hit = false;
   float tmin = std::numeric_limits<float>::max();
-  int argtri[2] {0,0};
 
   const float dy = 1.0/(impl->ny - 1);
   if (-EPS<ray.d.y && ray.d.y<EPS) { // horizontal
@@ -173,8 +278,6 @@ bool Heightfield2::Intersect(
         hit = true;
         if (t < tmin) {
           tmin = t;
-          argtri[0] = yidx;
-          argtri[1] = xidx;
         }
       }
     }
@@ -188,7 +291,7 @@ bool Heightfield2::Intersect(
     float dx, x, tray = t0;
     int ix, dix;
     if (ray.d.x >= 0) {
-      dx = 1.0/(impl->nx-1);
+        dx = 1.0/(impl->nx-1);
       x = 0;
       ix = 0;
       dix = 1;
@@ -208,52 +311,22 @@ bool Heightfield2::Intersect(
             hit = true;
             if (t < tmin) {
               tmin = t;
-              argtri[0] = yidx;
-              argtri[1] = 2*ix+k;
             }
           }
         }
+        if (dt>0 && hit) break;
         if (x<=xtop && xtop<=x+absdx) break;
         x += dx;
         ix += dix;
       }
+      if (dt>0 && hit) break;
       if (ix<0 || ix>=impl->nx-1) break;
     }
   }
-
-//  printf("C: hit=%d",hit);
-  if (!hit) return false;
-
-  const vector<pair<int,int>> &_pt = impl->tri[argtri[0]][argtri[1]];
-//  puts("D");
-  const Point p {ray(tmin)}
-            , &pt0 = impl->pt[COORD(_pt[0].first, _pt[0].second)]
-            , &pt1 = impl->pt[COORD(_pt[1].first, _pt[1].second)]
-            , &pt2 = impl->pt[COORD(_pt[2].first, _pt[2].second)];
-  const Vector ntri {Cross(pt1-pt0, pt2-pt0)};
-  const Vector dpdu {1,0,-ntri.x/ntri.z}, dpdv {0,1,-ntri.y/ntri.z};
-  const Vector n {Normalize(Cross(dpdu,dpdv))};
-  const Normal dndu {0,0,0}, dndv {0,0,0};
-
-//  puts("E");
-  const Transform &o2w = *ObjectToWorld;
-  *dg = { o2w(p), o2w(dpdu), o2w(dpdv), o2w(dndu), o2w(dndv), p.x, p.y, this };
-  dg->dudx = 1;
-  dg->dvdy = 1;
-
-//  puts("F");
-  *tHit = tmin;
-  *rayEpsilon = 1e-3f * tmin;
-//  puts("G");
-  return true;
+  return hit;
 }
 
-
-bool Heightfield2::IntersectP(const Ray &ray) const {
-  float tHit, rayEpsilon;
-  DifferentialGeometry dg;
-  return this->Intersect(ray, &tHit, &rayEpsilon, &dg);
-}
+#endif
 
 void Heightfield2::GetShadingGeometry(
   const Transform &obj2world,
