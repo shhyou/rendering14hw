@@ -37,9 +37,12 @@
 #include "paramset.h"
 
 #include <cassert>
+#include <cstdio>
 #include <stdexcept>
 #include <limits>
 #include <vector>
+
+#define PRRT 0
 
 using std::vector;
 using std::array;
@@ -150,58 +153,94 @@ bool Heightfield2::Intersect(
   Ray ray;
   (*WorldToObject)(r, &ray);
 
-  Point pst;
+  float t_init;
   const float d_inv[3] { 1.0f/ray.d.x, 1.0f/ray.d.y, 1.0f/ray.d.z };
   if (impl->bbox.Inside(ray(ray.mint))) {
-//    printf("\nintersect: inside\n");
-    pst = ray(ray.mint);
+    t_init = ray.mint;
   } else {
     bool hit = false;
-    float t0 = std::numeric_limits<float>::max();
+    t_init = std::numeric_limits<float>::max();
     for (int coord = 0; coord != 2; ++coord) {
       for (int k = 0; k < 2; ++k) {
-        const float border = (k==0? impl->dx:impl->dy)/2;
-        const float t = ((coord? (1.0 - border) : border) - ray.o[k])*d_inv[k];
-        if (impl->bbox.Inside(ray(t)) && t<t0) {
-          t0 = t;
+        const float t = (coord - ray.o[k])*d_inv[k];
+        auto pt = ray(t);
+        if (0<=pt.x && pt.x<=1 && 0<=pt.y && pt.y<=1 && t<t_init) {
+          t_init = t;
           hit = true;
         }
       }
     }
     if (!hit)
       return false;
-    pst = ray(t0);
-//    printf("\nintersect: at %f (%.8f,%.8f,%.8f)\n", t0, pst.x, pst.y, pst.z);
   }
 
-//  printf("direction: (%f,%f,%f)\n", ray.d.x, ray.d.y, ray.d.z);
+#if PRRT
+  printf("\nintersect: t=%f, (%f,%f,%f);\n           ray=(%f,%f,%f)+t(%f,%f,%f)\n",
+    t_init, ray(t_init)[0],ray(t_init)[1],ray(t_init)[2],
+    ray.o[0],ray.o[1],ray.o[2],ray.d[0],ray.d[1],ray.d[2]);
+  printf("           nx=%d,ny=%d,dx=%f,dy=%f\n",impl->nx,impl->ny,impl->dx,impl->dy);
+#endif
 
-  int coord[2] { static_cast<int>(pst.y * (impl->ny-1) + EPS)
-               , static_cast<int>(pst.x * (impl->nx-1) + EPS) };
+  int coord[2] { static_cast<int>((ray.o[1]+ray.d[1]*t_init)*(impl->ny-1) + EPS)
+               , static_cast<int>((ray.o[0]+ray.d[0]*t_init)*(impl->nx-1) + EPS) };
+
+//  printf("           coord=(%d,%d);",coord[1],coord[0]);
+
+  if (coord[0] == impl->ny-1) --coord[0];
+  if (coord[1] == impl->nx-1) --coord[1];
+
+//  printf(" (%d,%d)\n",coord[1],coord[0]);
 
   int argtri[2] {0,0};
 
-  const float t_step[2] { static_cast<float>(fabs(impl->dy * d_inv[1]))
-                        , static_cast<float>(fabs(impl->dx * d_inv[0])) };
-  float t_nxt[2];
-  int coord_step[2];
+  float t_nxt[2], t_step[2];
+  int coord_step[2], boundary[2];
 
-  for (int k = 0; k != 2; ++k) {
-    const float d = k==0? impl->dy : impl->dx;
-    if (ray.d[1-k] >= 0) {
-      t_nxt[k] = ((coord[k]+1)*d - ray.o[1-k]) * d_inv[1-k];
-      coord_step[k] = 1;
-    } else {
-      t_nxt[k] = (coord[k]*d - ray.o[1-k]) * d_inv[1-k];
-      coord_step[k] = -1;
-    }
+  // handle y
+  if (ray.d[1] >= 0) {
+    t_nxt[0] = ((coord[0]+1)*impl->dy - ray.o.y)*d_inv[1];
+    t_step[0] = impl->dy * d_inv[1];
+    coord_step[0] = 1;
+    boundary[0] = impl->ny - 1;
+  } else {
+    t_nxt[0] = (coord[0]*impl->dy - ray.o.y)*d_inv[1];
+    t_step[0] = - impl->dy * d_inv[1];
+    coord_step[0] = -1;
+    boundary[0] = -1;
+  }
+
+#if PRRT
+  printf("           %f v.s. %f\n",
+    ((coord[1]+1)*impl->dx - ray.o.x)*d_inv[0],
+    (coord[1]*impl->dx - ray.o.x)*d_inv[0]);
+#endif
+
+  // handle x
+  if (ray.d[0] >= 0) {
+    t_nxt[1] = ((coord[1]+1)*impl->dx - ray.o.x)*d_inv[0];
+    t_step[1] = impl->dx * d_inv[0];
+    coord_step[1] = 1;
+    boundary[1] = impl->nx - 1;
+  } else {
+    t_nxt[1] = (coord[1]*impl->dx - ray.o.x)*d_inv[0];
+    t_step[1] = - impl->dx * d_inv[0];
+    coord_step[1] = -1;
+    boundary[1] = -1;
   }
 
   bool hit = false;
   float tmin = std::numeric_limits<float>::max();
 
-  do {
-//    printf("at (%d,%d) in (%d,%d)\n", coord[0], coord[1], impl->ny-1, impl->nx-1);
+  int cnt = 0;
+  for (;;) {
+#if PRRT
+    printf("@(%d,%d) t_nxt={%f,%f} pt_nxt=(%f,%f,%f)\n",
+      coord[1],coord[0],t_nxt[1],t_nxt[0],
+      ray(t_nxt[t_nxt[0]>=t_nxt[1]])[0],
+      ray(t_nxt[t_nxt[0]>=t_nxt[1]])[1],
+      ray(t_nxt[t_nxt[0]>=t_nxt[1]])[2]);
+#endif
+
     for (int k = 0; k < 2; ++k) {
       float t;
       if (jiao_tri(impl, ray, impl->tri[coord[0]][coord[1]*2 + k], &t)) {
@@ -213,16 +252,21 @@ bool Heightfield2::Intersect(
         }
       }
     }
-    if (hit || (t_nxt[0]>ray.maxt && t_nxt[1]>ray.maxt)) break;
-    if (t_nxt[0] <= t_nxt[1]) {
-      coord[0] += coord_step[0];
-      t_nxt[0] += t_step[0];
-    } else {
-      coord[1] += coord_step[1];
-      t_nxt[1] += t_step[1];
-    }
-  } while (0<=coord[0] && coord[0]<impl->ny-1
-        && 0<=coord[1] && coord[1]<impl->nx-1);
+    if (hit) break;
+    int k = t_nxt[0] >= t_nxt[1];
+    if (t_nxt[k] > ray.maxt) break;
+    coord[k] += coord_step[k];
+    if (coord[k] == boundary[k]) break;
+    t_nxt[k] += t_step[k];
+
+    ++cnt;
+  }
+
+#if PRRT
+  printf(hit?"hit=#t,tmin=%f,pt=(%f,%f,%f)\n":"hit=#f\n",tmin,
+    ray(tmin)[0],ray(tmin)[1],ray(tmin)[2]);
+  std::getchar();
+#endif
 
   if (!hit) return false;
 
