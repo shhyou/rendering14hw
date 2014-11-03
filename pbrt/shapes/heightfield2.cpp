@@ -54,6 +54,7 @@ struct Heightfield2_impl {
   float * const z, minz, maxz;
   BBox bbox;
   vector<Point> pt;
+  vector<vector<Vector>> n;
   vector<vector<vector<pair<int,int>>>> tri;
   vector<vector<DifferentialGeometry>> tri_dg;
 };
@@ -110,6 +111,26 @@ Heightfield2::Heightfield2(const Transform *o2w, const Transform *w2o,
       }
     }
   }
+  ///////////////////////////////////////////////////////////////////
+  vector<vector<int>> cnt;
+  cnt.resize(impl->ny);
+  for (int y = 0; y < impl->ny; ++y)
+    cnt[y].resize(impl->nx);
+  impl->n.resize(impl->ny);
+  for (int y = 0; y < impl->ny; ++y)
+    impl->n[y].resize(impl->nx);
+  for (int y = 0; y < impl->ny-1; ++y) {
+    for (int kx = 0; kx < 2*(impl->nx-1); ++kx) {
+      for (int i = 0; i < 3; ++i) {
+        const int &pty = impl->tri[y][kx][i].first, &ptx = impl->tri[y][kx][i].second;
+        ++cnt[pty][ptx];
+        impl->n[pty][ptx] += Vector {impl->tri_dg[y][kx].nn};
+      }
+    }
+  }
+  for (int y = 0; y < impl->ny; ++y)
+    for (int x = 0; x < impl->nx; ++x)
+      impl->n[y][x] /= cnt[y][x];
 }
 
 
@@ -316,8 +337,8 @@ bool Heightfield2::Intersect(
 
   *dg = impl->tri_dg[argtri[0]][argtri[1]];
   dg->p = (*ObjectToWorld)(ray(tmin));
-  dg->u = dg->p.x;
-  dg->v = dg->p.y;
+  dg->u = argtri[0];
+  dg->v = argtri[1];
   *tHit = tmin;
   *rayEpsilon = 1e-3f * tmin;
   return true;
@@ -412,13 +433,43 @@ bool Heightfield2::IntersectP(const Ray &r) const {
   return false;
 }
 
+inline static float det3( const float& f0, const float& f3, const float& f6
+                        , const float& f1, const float& f4, const float& f7
+                        , const float& f2, const float& f5, const float& f8 )
+{
+  return f0*(f4*f8-f5*f7)-f3*(f1*f8-f2*f7)+f6*(f1*f5-f2*f4);
+}
 
 void Heightfield2::GetShadingGeometry(
-  const Transform &obj2world,
+  const Transform &o2w,
   const DifferentialGeometry &dg,
   DifferentialGeometry *dgShading) const
 {
+  const int ty = static_cast<int>(dg.u + 0.5);
+  const int tx = static_cast<int>(dg.v + 0.5);
+  const vector<pair<int,int>> &_pt = impl->tri[ty][tx];
+  const Point &p0 = o2w(impl->pt[COORD(_pt[0].first, _pt[0].second)])
+            , &p1 = o2w(impl->pt[COORD(_pt[1].first, _pt[1].second)])
+            , &p2 = o2w(impl->pt[COORD(_pt[2].first, _pt[2].second)])
+            , p = dg.p;
+  const float w[3] { det3( p.x,  p1.x, p2.x
+                         , p.y,  p1.y, p2.y
+                         , p.z,  p1.z, p2.z )
+                   , det3( p0.x, p.x,  p2.x
+                         , p0.y, p.y,  p2.y
+                         , p0.z, p.z,  p2.z )
+                   , det3( p0.x, p1.x, p.x
+                         , p0.y, p1.y, p.y
+                         , p0.z, p1.z, p.z ) };
+  const Vector n { w[0]*impl->n[_pt[0].first][_pt[0].second]
+                 + w[1]*impl->n[_pt[1].first][_pt[1].second]
+                 + w[2]*impl->n[_pt[2].first][_pt[2].second] };
+  const Vector u = Cross(n, Vector {0,0,1});
+  const Vector v = Cross(u, n);
   *dgShading = dg;
+  dgShading->nn = Normal {Normalize(Cross(u,v))};
+  dgShading->dpdu = u;
+  dgShading->dpdv = v;
 }
 
 
