@@ -228,7 +228,6 @@ bool Heightfield2::Intersect(
   bool hit = false;
   float tmin = std::numeric_limits<float>::max();
 
-  int cnt = 0;
   for (;;) {
 #if PRRT
     printf("@(%d,%d,%d) t_nxt={%f,%f,%f} pt_nxt=(%f,%f,%f)\n",
@@ -266,8 +265,6 @@ bool Heightfield2::Intersect(
     coord[k] += coord_step[k];
     if (coord[k] == boundary[k]) break;
     t_nxt[k] += t_step[k];
-
-    ++cnt;
   }
 
 #if PRRT
