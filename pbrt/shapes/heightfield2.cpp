@@ -55,6 +55,7 @@ struct Heightfield2_impl {
   BBox bbox;
   vector<Point> pt;
   vector<vector<vector<pair<int,int>>>> tri;
+  vector<vector<DifferentialGeometry>> tri_dg;
 };
 
 #define COORD(y,x) ((y)*impl->nx + (x))
@@ -87,6 +88,28 @@ Heightfield2::Heightfield2(const Transform *o2w, const Transform *w2o,
   impl->minz = minz;
   impl->maxz = maxz;
   impl->bbox = BBox(Point(0,0,impl->minz), Point(1,1,impl->maxz));
+  ///////////////////////////////////////////////////////////////////
+  const Transform &real_o2w = *o2w;
+  const Normal dndu {0,0,0}, dndv {0,0,0};
+  for (int y = 0; y < impl->ny-1; ++y) {
+    impl->tri_dg.push_back({});
+    for (int x = 0; x < impl->nx-1; ++x) {
+      for (int k = 0; k < 2; ++k) {
+        const vector<pair<int,int>> &_pt = impl->tri[y][x*2+k];
+        const Point &pt0 = impl->pt[COORD(_pt[0].first, _pt[0].second)]
+                  , &pt1 = impl->pt[COORD(_pt[1].first, _pt[1].second)]
+                  , &pt2 = impl->pt[COORD(_pt[2].first, _pt[2].second)];
+        const Vector ntri {Cross(pt1-pt0, pt2-pt0)};
+        const float inv_z = 1.0/ntri.z;
+        const Vector dpdu {1,0,-ntri.x*inv_z}, dpdv {0,1,-ntri.y*inv_z};
+        impl->tri_dg.back().emplace_back(Point(), real_o2w(dpdu), real_o2w(dpdv),
+                                                  real_o2w(dndu), real_o2w(dndv),
+                                                  -1.f, -1.f, this);
+        impl->tri_dg.back().back().dudx = 1;
+        impl->tri_dg.back().back().dvdy = 1;
+      }
+    }
+  }
 }
 
 
@@ -291,22 +314,11 @@ bool Heightfield2::Intersect(
 
   if (!hit) return false;
 
-  const vector<pair<int,int>> &_pt = impl->tri[argtri[0]][argtri[1]];
-  const Point p {ray(tmin)}
-            , &pt0 = impl->pt[COORD(_pt[0].first, _pt[0].second)]
-            , &pt1 = impl->pt[COORD(_pt[1].first, _pt[1].second)]
-            , &pt2 = impl->pt[COORD(_pt[2].first, _pt[2].second)];
-  const Vector ntri {Cross(pt1-pt0, pt2-pt0)};
-  const float inv_z = 1.0/ntri.z;
-  const Vector dpdu {1,0,-ntri.x*inv_z}, dpdv {0,1,-ntri.y*inv_z};
-  const Vector n {Cross(dpdu,dpdv)};
-  const static Normal dndu {0,0,0}, dndv {0,0,0};
-
-  const Transform &o2w = *ObjectToWorld;
-  *dg = { o2w(p), o2w(dpdu), o2w(dpdv), o2w(dndu), o2w(dndv), p.x, p.y, this };
-  dg->dudx = 1;
-  dg->dvdy = 1;
-
+  const Point p {ray(tmin)};
+  *dg = impl->tri_dg[argtri[0]][argtri[1]];
+  dg->p = (*ObjectToWorld)(p);
+  dg->u = p.x;
+  dg->v = p.y;
   *tHit = tmin;
   *rayEpsilon = 1e-3f * tmin;
   return true;
