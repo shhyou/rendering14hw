@@ -54,8 +54,6 @@ struct Heightfield2_impl {
   float * const z, minz, maxz;
   BBox bbox;
   vector<Point> pt;
-  vector<vector<vector<pair<int,int>>>> tri;
-  vector<vector<DifferentialGeometry>> tri_dg;
 };
 
 #define COORD(y,x) ((y)*impl->nx + (x))
@@ -72,13 +70,6 @@ Heightfield2::Heightfield2(const Transform *o2w, const Transform *w2o,
   for (int y = 0; y < impl->ny; ++y)
     for (int x = 0; x < impl->nx; ++x)
       impl->pt.emplace_back( x*impl->dx, y*impl->dy, impl->z[COORD(y,x)] );
-  for (int y = 0; y < impl->ny-1; ++y) {
-    impl->tri.push_back({});
-    for (int x = 0; x < impl->nx-1; ++x) {
-      impl->tri.back().push_back({{y,x}, {y,x+1},   {y+1,x+1}});
-      impl->tri.back().push_back({{y,x}, {y+1,x+1}, {y+1,x}});
-    }
-  }
   ///////////////////////////////////////////////////////////////////
   float minz = impl->z[0], maxz = impl->z[0];
   for (int i = 1; i < impl->nx*impl->ny; ++i) {
@@ -89,27 +80,6 @@ Heightfield2::Heightfield2(const Transform *o2w, const Transform *w2o,
   impl->maxz = maxz;
   impl->bbox = BBox(Point(0,0,impl->minz), Point(1,1,impl->maxz));
   ///////////////////////////////////////////////////////////////////
-  const Transform &real_o2w = *o2w;
-  const Normal dndu {0,0,0}, dndv {0,0,0};
-  for (int y = 0; y < impl->ny-1; ++y) {
-    impl->tri_dg.push_back({});
-    for (int x = 0; x < impl->nx-1; ++x) {
-      for (int k = 0; k < 2; ++k) {
-        const vector<pair<int,int>> &_pt = impl->tri[y][x*2+k];
-        const Point &pt0 = impl->pt[COORD(_pt[0].first, _pt[0].second)]
-                  , &pt1 = impl->pt[COORD(_pt[1].first, _pt[1].second)]
-                  , &pt2 = impl->pt[COORD(_pt[2].first, _pt[2].second)];
-        const Vector ntri {Cross(pt1-pt0, pt2-pt0)};
-        const float inv_z = 1.0/ntri.z;
-        const Vector dpdu {1,0,-ntri.x*inv_z}, dpdv {0,1,-ntri.y*inv_z};
-        impl->tri_dg.back().emplace_back(Point(), real_o2w(dpdu), real_o2w(dpdv),
-                                                  real_o2w(dndu), real_o2w(dndv),
-                                                  -1.f, -1.f, this);
-        impl->tri_dg.back().back().dudx = 1;
-        impl->tri_dg.back().back().dvdy = 1;
-      }
-    }
-  }
 }
 
 
@@ -131,12 +101,14 @@ static const float EPS = 1e-10;
 inline static bool jiao_tri(
   const Heightfield2_impl *impl,
   const Ray &ray,
-  const vector<pair<int,int>>& _pt,
+  const int y1, const int x1,
+  const int y2, const int x2,
+  const int y3, const int x3,
   float* tHit)
 {
-  const Point &pt0 = impl->pt[COORD(_pt[0].first, _pt[0].second)]
-            , &pt1 = impl->pt[COORD(_pt[1].first, _pt[1].second)]
-            , &pt2 = impl->pt[COORD(_pt[2].first, _pt[2].second)];
+  const Point &pt0 = impl->pt[COORD(y1, x1)]
+            , &pt1 = impl->pt[COORD(y2, x2)]
+            , &pt2 = impl->pt[COORD(y3, x3)];
   const Vector e1 = pt1 - pt0;
   const Vector e2 = pt2 - pt0;
   const Vector s1 = Cross(ray.d, e2);
@@ -247,7 +219,7 @@ bool Heightfield2::Intersect(
   }
 
   bool hit = false;
-  int argtri[2] {0,0};
+  int argtri[3] {0,0,0};
   float tmin = std::numeric_limits<float>::max();
 
   for (;;) {
@@ -261,12 +233,23 @@ bool Heightfield2::Intersect(
 
     for (int k = 0; k < 2; ++k) {
       float t;
-      if (jiao_tri(impl, ray, impl->tri[coord[1]][coord[0]*2+k], &t)) {
+      const int&y = coord[1], &x = coord[0];
+      if (jiao_tri(impl, ray, y, x, y, x+1, y+1, x+1, &t)) {
         hit = true;
         if (t < tmin) {
           tmin = t;
-          argtri[0] = coord[1];
-          argtri[1] = coord[0]*2+k;
+          argtri[0] = COORD(y,x);
+          argtri[1] = COORD(y,x+1);
+          argtri[2] = COORD(y+1,x+1);
+        }
+      }
+      if (jiao_tri(impl, ray, y, x, y+1, x+1, y+1, x, &t)) {
+        hit = true;
+        if (t < tmin) {
+          tmin = t;
+          argtri[0] = COORD(y,x);
+          argtri[1] = COORD(y+1,x+1);
+          argtri[2] = COORD(y+1,x);
         }
       }
     }
@@ -314,10 +297,20 @@ bool Heightfield2::Intersect(
 
   if (!hit) return false;
 
-  *dg = impl->tri_dg[argtri[0]][argtri[1]];
-  dg->p = (*ObjectToWorld)(ray(tmin));
-  dg->u = dg->p.x;
-  dg->v = dg->p.y;
+  const Transform &real_o2w = *ObjectToWorld;
+  const static Normal dndu {0,0,0}, dndv {0,0,0};
+  const Point &pt0 = impl->pt[argtri[0]]
+            , &pt1 = impl->pt[argtri[1]]
+            , &pt2 = impl->pt[argtri[2]];
+  const Vector ntri {Cross(pt1-pt0, pt2-pt0)};
+  const float inv_z = 1.0/ntri.z;
+  const Vector dpdu {1,0,-ntri.x*inv_z}, dpdv {0,1,-ntri.y*inv_z};
+  const Point pt = ray(tmin);
+  *dg = {real_o2w(pt), real_o2w(dpdu), real_o2w(dpdv),
+                                       real_o2w(dndu), real_o2w(dndv),
+                                       pt.x, pt.y, this};
+  dg->dudx = 1;
+  dg->dvdy = 1;
   *tHit = tmin;
   *rayEpsilon = 1e-3f * tmin;
   return true;
@@ -388,9 +381,10 @@ bool Heightfield2::IntersectP(const Ray &r) const {
   for (;;) {
     for (int k = 0; k < 2; ++k) {
       float t;
-      if (jiao_tri(impl, ray, impl->tri[coord[1]][coord[0]*2+k], &t)) {
+      const int&y = coord[1], &x = coord[0];
+      if (jiao_tri(impl, ray, y, x, y, x+1, y+1, x+1, &t)
+       || jiao_tri(impl, ray, y, x, y+1, x+1, y+1, x, &t))
         return true;
-      }
     }
     int cmp_res = ((t_nxt[0]>=t_nxt[1])<<2)
                 | ((t_nxt[0]>=t_nxt[2])<<1)
