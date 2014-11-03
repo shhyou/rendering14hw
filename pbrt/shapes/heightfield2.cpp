@@ -158,7 +158,7 @@ bool Heightfield2::Intersect(
   if (impl->bbox.Inside(ray(ray.mint))) {
     t_init = ray.mint;
   } else if (!impl->bbox.IntersectP(ray, &t_init)) {
-    return 0;
+    return false;
   }
 
 #if PRRT
@@ -174,8 +174,6 @@ bool Heightfield2::Intersect(
 
   if (coord[0] == impl->nx-1) --coord[0];
   if (coord[1] == impl->ny-1) --coord[1];
-
-  int argtri[2] {0,0};
 
   float t_nxt[3], t_step[3];
   int coord_step[3], boundary[3];
@@ -226,6 +224,7 @@ bool Heightfield2::Intersect(
   }
 
   bool hit = false;
+  int argtri[2] {0,0};
   float tmin = std::numeric_limits<float>::max();
 
   for (;;) {
@@ -268,9 +267,26 @@ bool Heightfield2::Intersect(
   }
 
 #if PRRT
-  printf(hit?"hit=#t,tmin=%f,pt=(%f,%f,%f)\n":"hit=#f\n",tmin,
-    ray(tmin)[0],ray(tmin)[1],ray(tmin)[2]);
-  std::getchar();
+  printf(hit?"hit=#t,tmin=%f,pt=(%f,%f,%f),argtri=(%d,%d)\n":"hit=#f\n",tmin,
+    ray(tmin)[0],ray(tmin)[1],ray(tmin)[2],
+    argtri[0],argtri[1]);
+  for (int y = 0; y < impl->ny-1; ++y) {
+    for (int x = 0; x < impl->nx-1; ++x) {
+      for (int k = 0; k < 2; ++k) {
+        float t;
+        if (jiao_tri(impl, ray, impl->tri[y][x*2+k], &t)) {
+          if (t<tmin) {
+            printf("\nQQ:jiao at (%d,%d), t=%.10f; tmin=%.10f; arg=(%d,%d)\n",
+              y,x*2+k,t,tmin,argtri[0],argtri[1]);
+            std::getchar();
+          } else if (t<=tmin+1e-4 && (y!=argtri[0]||x*2+k!=argtri[1])) {
+            printf("\nXD:jiao at (%d,%d), t=%.10f; tmin=%.10f; arg=(%d,%d)\n",
+              y,x*2+k,t,tmin,argtri[0],argtri[1]);
+          }
+        }
+      }
+    }
+  }
 #endif
 
   if (!hit) return false;
@@ -282,7 +298,7 @@ bool Heightfield2::Intersect(
             , &pt2 = impl->pt[COORD(_pt[2].first, _pt[2].second)];
   const Vector ntri {Cross(pt1-pt0, pt2-pt0)};
   const float inv_z = 1.0/ntri.z;
-  const Vector dpdu {1,0,-ntri.x/inv_z}, dpdv {0,1,-ntri.y/inv_z};
+  const Vector dpdu {1,0,-ntri.x*inv_z}, dpdv {0,1,-ntri.y*inv_z};
   const Vector n {Cross(dpdu,dpdv)};
   const static Normal dndu {0,0,0}, dndv {0,0,0};
 
@@ -297,85 +313,94 @@ bool Heightfield2::Intersect(
 }
 
 
-#if 1
-
-bool Heightfield2::IntersectP(const Ray &ray) const {
-  float tHit, rayEpsilon;
-  DifferentialGeometry dg;
-  return this->Intersect(ray, &tHit, &rayEpsilon, &dg);
-}
-
-#else
-
 bool Heightfield2::IntersectP(const Ray &r) const {
-  vector<vector<vector<pair<int,int>>>> &tri = impl->tri;
   Ray ray;
   (*WorldToObject)(r, &ray);
 
-  bool hit = false;
-  float tmin = std::numeric_limits<float>::max();
-
-  const float dy = 1.0/(impl->ny - 1);
-  if (-EPS<ray.d.y && ray.d.y<EPS) { // horizontal
-    float y = 0;
-    int yidx;
-    for (yidx = 0; yidx < impl->ny-1; ++yidx, y += dy)
-      if (y<=ray.o.y && ray.o.y<=y+dy) break;
-    for (int xidx = 0; xidx < 2*(impl->nx-1); ++xidx) {
-      float t;
-      if (jiao_tri(this->impl, ray, tri[yidx][xidx], &t)) {
-        hit = true;
-        if (t < tmin) {
-          tmin = t;
-        }
-      }
-    }
-  } else {
-    float t0, t1;
-    if (!jiao_plane(ray, Point{0,0,0}, Vector{0,1,0}, &t0)
-       || !jiao_plane(ray, Point{0,dy,0}, Vector{0,1,0}, &t1))
-      return false;
-    const float dt = t1 - t0;
-
-    float dx, x, tray = t0;
-    int ix, dix;
-    if (ray.d.x >= 0) {
-        dx = 1.0/(impl->nx-1);
-      x = 0;
-      ix = 0;
-      dix = 1;
-    } else {
-      dx = -1.0/(impl->nx-1);
-      x = 1 + dx;
-      ix = impl->nx-2;
-      dix = -1;
-    }
-    const float absdx = fabs(dx);
-    for (int yidx = 0; yidx < impl->ny-1; ++yidx, tray += dt) {
-      const float xtop = ray(tray+dt).x;
-      while (0 <= ix && ix < impl->nx-1) {
-        for (int k = 0; k < 2; ++k) {
-          float t;
-          if (jiao_tri(this->impl, ray, tri[yidx][2*ix+k], &t)) {
-            hit = true;
-            if (t < tmin) {
-              tmin = t;
-            }
-          }
-        }
-        if (dt>0 && hit) break;
-        if (x<=xtop && xtop<=x+absdx) break;
-        x += dx;
-        ix += dix;
-      }
-      if (dt>0 && hit) break;
-      if (ix<0 || ix>=impl->nx-1) break;
-    }
+  float t_init;
+  const float d_inv[3] { 1.0f/ray.d.x, 1.0f/ray.d.y, 1.0f/ray.d.z };
+  if (impl->bbox.Inside(ray(ray.mint))) {
+    t_init = ray.mint;
+  } else if (!impl->bbox.IntersectP(ray, &t_init)) {
+    return false;
   }
-  return hit;
+
+  int coord[3] = { static_cast<int>((ray.o.x + t_init*ray.d.x)*(impl->nx-1) + EPS)
+                 , static_cast<int>((ray.o.y + t_init*ray.d.y)*(impl->ny-1) + EPS)
+                 , 0 };
+
+  if (coord[0] == impl->nx-1) --coord[0];
+  if (coord[1] == impl->ny-1) --coord[1];
+
+  float t_nxt[3], t_step[3];
+  int coord_step[3], boundary[3];
+
+  // handle z
+  if (ray.d[2] >= 0) {
+    t_nxt[2] = (impl->maxz - ray.o.z)*d_inv[2];
+    t_step[2] = (impl->maxz-impl->minz)*d_inv[2]; // unimportant
+    coord_step[2] = 1;
+    boundary[2] = 1;
+  } else {
+    t_nxt[2] = (impl->minz - ray.o.z)*d_inv[2];
+    t_step[2] = -(impl->maxz-impl->minz)*d_inv[2]; // unimportant
+    coord_step[2] = -1;
+    boundary[2] = -1;
+  }
+
+  // handle y
+  if (ray.d[1] >= 0) {
+    t_nxt[1] = ((coord[1]+1)*impl->dy - ray.o.y)*d_inv[1];
+    t_step[1] = impl->dy * d_inv[1];
+    coord_step[1] = 1;
+    boundary[1] = impl->ny - 1;
+  } else {
+    t_nxt[1] = (coord[1]*impl->dy - ray.o.y)*d_inv[1];
+    t_step[1] = - impl->dy * d_inv[1];
+    coord_step[1] = -1;
+    boundary[1] = -1;
+  }
+
+  // handle x
+  if (ray.d[0] >= 0) {
+    t_nxt[0] = ((coord[0]+1)*impl->dx - ray.o.x)*d_inv[0];
+    t_step[0] = impl->dx * d_inv[0];
+    coord_step[0] = 1;
+    boundary[0] = impl->nx - 1;
+  } else {
+    t_nxt[0] = (coord[0]*impl->dx - ray.o.x)*d_inv[0];
+    t_step[0] = - impl->dx * d_inv[0];
+    coord_step[0] = -1;
+    boundary[0] = -1;
+  }
+
+  for (;;) {
+    for (int k = 0; k < 2; ++k) {
+      float t;
+      if (jiao_tri(impl, ray, impl->tri[coord[1]][coord[0]*2+k], &t)) {
+        return true;
+      }
+    }
+    int cmp_res = ((t_nxt[0]>=t_nxt[1])<<2)
+                | ((t_nxt[0]>=t_nxt[2])<<1)
+                | (t_nxt[1]>=t_nxt[2]);
+    static const int lookup_cmp[8] = { 0           // 0<1   0<2   1<2
+                                     , 0           // 0<1   0<2   2<=1
+                                     , 2147483647  // 0<1   2<=0  1<2
+                                     , 2           // 0<1   2<=0  2<=1
+                                     , 1           // 1<=0  0<2   1<2
+                                     , 2147483647  // 1<=0  0<2   2<=1
+                                     , 1           // 1<=0  2<=0  1<2
+                                     , 2 };        // 1<=0  2<=0  2<=1
+    int k = lookup_cmp[cmp_res];
+    if (t_nxt[k] > ray.maxt) break;
+    coord[k] += coord_step[k];
+    if (coord[k] == boundary[k]) break;
+    t_nxt[k] += t_step[k];
+  }
+  return false;
 }
 
-#endif
 
 void Heightfield2::GetShadingGeometry(
   const Transform &obj2world,
@@ -384,6 +409,7 @@ void Heightfield2::GetShadingGeometry(
 {
   *dgShading = dg;
 }
+
 
 Heightfield2 *CreateHeightfieldShape2(
   const Transform *o2w,
