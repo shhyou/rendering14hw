@@ -464,10 +464,10 @@ void Heightfield2::GetShadingGeometry(
   const Vector n { w[0]*impl->n[_pt[0].first][_pt[0].second]
                  + w[1]*impl->n[_pt[1].first][_pt[1].second]
                  + w[2]*impl->n[_pt[2].first][_pt[2].second] };
-  const Vector u = Cross(Vector {0,0,1}, n);
-  const Vector v = Cross(n, u);
+  const Vector u = Cross(n, Vector {0,0,1});
+  const Vector v = Cross(u, n);
   *dgShading = dg;
-  dgShading->nn = Normal {n};
+  dgShading->nn = Normal {Normalize(Cross(u,v))};
   dgShading->dpdu = u;
   dgShading->dpdv = v;
 }
