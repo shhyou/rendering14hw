@@ -314,11 +314,10 @@ bool Heightfield2::Intersect(
 
   if (!hit) return false;
 
-  const Point p {ray(tmin)};
   *dg = impl->tri_dg[argtri[0]][argtri[1]];
-  dg->p = (*ObjectToWorld)(p);
-  dg->u = p.x;
-  dg->v = p.y;
+  dg->p = (*ObjectToWorld)(ray(tmin));
+  dg->u = dg->p.x;
+  dg->v = dg->p.y;
   *tHit = tmin;
   *rayEpsilon = 1e-3f * tmin;
   return true;
