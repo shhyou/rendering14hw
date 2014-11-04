@@ -36,8 +36,8 @@
 #include "core/transform.h"
 #include "paramset.h"
 
-#include <cassert>
 #include <cstdio>
+#include <cstring>
 #include <stdexcept>
 #include <limits>
 #include <vector>
@@ -101,8 +101,7 @@ Heightfield2::Heightfield2(const Transform *o2w, const Transform *w2o,
                   , &pt1 = impl->pt[COORD(_pt[1].first, _pt[1].second)]
                   , &pt2 = impl->pt[COORD(_pt[2].first, _pt[2].second)];
         const Vector ntri {Cross(pt1-pt0, pt2-pt0)};
-        const float inv_z = 1.0/ntri.z;
-        const Vector dpdu {1,0,-ntri.x*inv_z}, dpdv {0,1,-ntri.y*inv_z};
+        const Vector dpdu {ntri.z,0,-ntri.x}, dpdv {0,ntri.z,-ntri.y};
         impl->tri_dg.back().emplace_back(Point(), real_o2w(dpdu), real_o2w(dpdv),
                                                   real_o2w(dndu), real_o2w(dndv),
                                                   -1.f, -1.f, this);
@@ -445,8 +444,8 @@ void Heightfield2::GetShadingGeometry(
   const DifferentialGeometry &dg,
   DifferentialGeometry *dgShading) const
 {
-  const int ty = static_cast<int>(dg.u + 0.5);
-  const int tx = static_cast<int>(dg.v + 0.5);
+  const int ty = static_cast<int>(dg.u + 0.1f);
+  const int tx = static_cast<int>(dg.v + 0.1f);
   const vector<pair<int,int>> &_pt = impl->tri[ty][tx];
   const Point &p0 = o2w(impl->pt[COORD(_pt[0].first, _pt[0].second)])
             , &p1 = o2w(impl->pt[COORD(_pt[1].first, _pt[1].second)])
@@ -464,12 +463,16 @@ void Heightfield2::GetShadingGeometry(
   const Vector n { w[0]*impl->n[_pt[0].first][_pt[0].second]
                  + w[1]*impl->n[_pt[1].first][_pt[1].second]
                  + w[2]*impl->n[_pt[2].first][_pt[2].second] };
+  std::memcpy(dgShading, &dg, sizeof(DifferentialGeometry));
+  dgShading->nn = Normal{Normalize(n)};
+#if 0
+// not really needed -- only normal is used
+// the u,v aren't correct anyway
   const Vector u = Cross(n, Vector {0,0,1});
   const Vector v = Cross(u, n);
-  *dgShading = dg;
-  dgShading->nn = Normal {Normalize(Cross(u,v))};
   dgShading->dpdu = u;
   dgShading->dpdv = v;
+#endif
 }
 
 
