@@ -29,6 +29,8 @@
 
  */
 
+#define PHONG_INTERPOLATION 0
+
 // shapes/heightfield2.cpp*
 #include "stdafx.h"
 #include "shapes/heightfield2.h"
@@ -42,8 +44,6 @@
 #include <limits>
 #include <vector>
 
-#define PRRT 0
-
 using std::vector;
 using std::array;
 using std::pair;
@@ -54,9 +54,11 @@ struct Heightfield2_impl {
   float * const z, minz, maxz;
   BBox bbox;
   vector<Point> pt;
+#if PHONG_INTERPOLATION
   vector<vector<Vector>> n;
   vector<vector<vector<pair<int,int>>>> tri;
   vector<vector<DifferentialGeometry>> tri_dg;
+#endif
 };
 
 #define COORD(y,x) ((y)*impl->nx + (x))
@@ -73,13 +75,6 @@ Heightfield2::Heightfield2(const Transform *o2w, const Transform *w2o,
   for (int y = 0; y < impl->ny; ++y)
     for (int x = 0; x < impl->nx; ++x)
       impl->pt.emplace_back( x*impl->dx, y*impl->dy, impl->z[COORD(y,x)] );
-  for (int y = 0; y < impl->ny-1; ++y) {
-    impl->tri.push_back({});
-    for (int x = 0; x < impl->nx-1; ++x) {
-      impl->tri.back().push_back({{y,x}, {y,x+1},   {y+1,x+1}});
-      impl->tri.back().push_back({{y,x}, {y+1,x+1}, {y+1,x}});
-    }
-  }
   ///////////////////////////////////////////////////////////////////
   float minz = impl->z[0], maxz = impl->z[0];
   for (int i = 1; i < impl->nx*impl->ny; ++i) {
@@ -89,6 +84,15 @@ Heightfield2::Heightfield2(const Transform *o2w, const Transform *w2o,
   impl->minz = minz;
   impl->maxz = maxz;
   impl->bbox = BBox(Point(0,0,impl->minz), Point(1,1,impl->maxz));
+  ///////////////////////////////////////////////////////////////////
+#if PHONG_INTERPOLATION
+  for (int y = 0; y < impl->ny-1; ++y) {
+    impl->tri.push_back({});
+    for (int x = 0; x < impl->nx-1; ++x) {
+      impl->tri.back().push_back({{y,x}, {y,x+1},   {y+1,x+1}});
+      impl->tri.back().push_back({{y,x}, {y+1,x+1}, {y+1,x}});
+    }
+  }
   ///////////////////////////////////////////////////////////////////
   const Transform &real_o2w = *o2w;
   const Normal dndu {0,0,0}, dndv {0,0,0};
@@ -131,6 +135,7 @@ Heightfield2::Heightfield2(const Transform *o2w, const Transform *w2o,
   for (int y = 0; y < impl->ny; ++y)
     for (int x = 0; x < impl->nx; ++x)
       impl->n[y][x] /= cnt[y][x];
+#endif
 }
 
 
@@ -152,12 +157,24 @@ static const float EPS = 1e-10;
 inline static bool jiao_tri(
   const Heightfield2_impl *impl,
   const Ray &ray,
+#if PHONG_INTERPOLATION
   const vector<pair<int,int>>& _pt,
+#else
+  const int& y0, const int& x0,
+  const int& y1, const int& x1,
+  const int& y2, const int& x2,
+#endif
   float* tHit)
 {
+#if PHONG_INTERPOLATION
   const Point &pt0 = impl->pt[COORD(_pt[0].first, _pt[0].second)]
             , &pt1 = impl->pt[COORD(_pt[1].first, _pt[1].second)]
             , &pt2 = impl->pt[COORD(_pt[2].first, _pt[2].second)];
+#else
+  const Point &pt0 = impl->pt[COORD(y0, x0)]
+            , &pt1 = impl->pt[COORD(y1, x1)]
+            , &pt2 = impl->pt[COORD(y2, x2)];
+#endif
   const Vector e1 = pt1 - pt0;
   const Vector e2 = pt2 - pt0;
   const Vector s1 = Cross(ray.d, e2);
@@ -205,13 +222,6 @@ bool Heightfield2::Intersect(
     return false;
   }
 
-#if PRRT
-  printf("\nintersect: t=%f, (%f,%f,%f);\n           ray=(%f,%f,%f)+t(%f,%f,%f)\n",
-    t_init, ray(t_init)[0],ray(t_init)[1],ray(t_init)[2],
-    ray.o[0],ray.o[1],ray.o[2],ray.d[0],ray.d[1],ray.d[2]);
-  printf("           nx=%d,ny=%d,dx=%f,dy=%f,minz=%f,maxz=%f\n",impl->nx,impl->ny,impl->dx,impl->dy,impl->minz,impl->maxz);
-#endif
-
   int coord[3] = { static_cast<int>((ray.o.x + t_init*ray.d.x)*(impl->nx-1) + EPS)
                  , static_cast<int>((ray.o.y + t_init*ray.d.y)*(impl->ny-1) + EPS)
                  , 0 };
@@ -248,12 +258,6 @@ bool Heightfield2::Intersect(
     boundary[1] = -1;
   }
 
-#if PRRT
-  printf("           %f v.s. %f\n",
-    ((coord[0]+1)*impl->dx - ray.o.x)*d_inv[0],
-    (coord[0]*impl->dx - ray.o.x)*d_inv[0]);
-#endif
-
   // handle x
   if (ray.d[0] >= 0) {
     t_nxt[0] = ((coord[0]+1)*impl->dx - ray.o.x)*d_inv[0];
@@ -268,18 +272,11 @@ bool Heightfield2::Intersect(
   }
 
   bool hit = false;
-  int argtri[2] {0,0};
+  int argtri[3] {0,0,0};
   float tmin = std::numeric_limits<float>::max();
 
   for (;;) {
-#if PRRT
-    printf("@(%d,%d,%d) t_nxt={%f,%f,%f} pt_nxt=(%f,%f,%f)\n",
-      coord[0],coord[1],coord[2],t_nxt[0],t_nxt[1],t_nxt[2],
-      ray(t_nxt[t_nxt[1]>=t_nxt[0]])[0],
-      ray(t_nxt[t_nxt[1]>=t_nxt[0]])[1],
-      ray(t_nxt[t_nxt[1]>=t_nxt[0]])[2]);
-#endif
-
+#if PHONG_INTERPOLATION
     for (int k = 0; k < 2; ++k) {
       float t;
       if (jiao_tri(impl, ray, impl->tri[coord[1]][coord[0]*2+k], &t)) {
@@ -291,6 +288,32 @@ bool Heightfield2::Intersect(
         }
       }
     }
+#else
+    float t;
+    const int &y = coord[1], &x = coord[0];
+    if (jiao_tri(impl, ray, y,   x,
+                            y,   x+1,
+                            y+1, x+1, &t)) {
+      hit = true;
+      if (t < tmin) {
+        tmin = t;
+        argtri[0] = COORD(y,x);
+        argtri[1] = COORD(y,x+1);
+        argtri[2] = COORD(y+1,x+1);
+      }
+    }
+    if (jiao_tri(impl, ray, y,   x,
+                            y+1, x+1,
+                            y+1, x, &t)) {
+      hit = true;
+      if (t < tmin) {
+        tmin = t;
+        argtri[0] = COORD(y,x);
+        argtri[1] = COORD(y+1,x+1);
+        argtri[2] = COORD(y+1,x);
+      }
+    }
+#endif
     if (hit) break;
     int cmp_res = ((t_nxt[0]>=t_nxt[1])<<2)
                 | ((t_nxt[0]>=t_nxt[2])<<1)
@@ -310,36 +333,25 @@ bool Heightfield2::Intersect(
     t_nxt[k] += t_step[k];
   }
 
-#if PRRT
-  printf(hit?"hit=#t,tmin=%f,pt=(%f,%f,%f),argtri=(%d,%d)\n":"hit=#f\n",tmin,
-    ray(tmin)[0],ray(tmin)[1],ray(tmin)[2],
-    argtri[0],argtri[1]);
-  for (int y = 0; y < impl->ny-1; ++y) {
-    for (int x = 0; x < impl->nx-1; ++x) {
-      for (int k = 0; k < 2; ++k) {
-        float t;
-        if (jiao_tri(impl, ray, impl->tri[y][x*2+k], &t)) {
-          if (t<tmin) {
-            printf("\nQQ:jiao at (%d,%d), t=%.10f; tmin=%.10f; arg=(%d,%d)\n",
-              y,x*2+k,t,tmin,argtri[0],argtri[1]);
-            std::getchar();
-          } else if (t<=tmin+1e-4 && (y!=argtri[0]||x*2+k!=argtri[1])) {
-            printf("\nXD:jiao at (%d,%d), t=%.10f; tmin=%.10f; arg=(%d,%d)\n",
-              y,x*2+k,t,tmin,argtri[0],argtri[1]);
-          }
-        }
-      }
-    }
-  }
-#endif
-
   if (!hit) return false;
 
   const Point pt {ray(tmin)};
+#if PHONG_INTERPOLATION
   *dg = impl->tri_dg[argtri[0]][argtri[1]];
   dg->p = (*ObjectToWorld)(pt);
   dg->u = pt.x;
   dg->v = pt.y;
+#else
+  const Vector ntri {Cross( impl->pt[argtri[1]]-impl->pt[argtri[0]]
+                          , impl->pt[argtri[2]]-impl->pt[argtri[0]] )};
+  const float z_inv = 1.0f/ntri.z;
+  const Vector dpdu {1,0,-ntri.x*z_inv}, dpdv {0,1,-ntri.y*z_inv};
+  static const Normal dndu {0,0,0}, dndv {0,0,0};
+  const Transform &o2w = *ObjectToWorld;
+  *dg = { o2w(pt), o2w(dpdu), o2w(dpdv), o2w(dndu), o2w(dndv), pt.x, pt.y, this };
+  dg->dudx = 1;
+  dg->dvdy = 1;
+#endif
   *tHit = tmin;
   *rayEpsilon = 1e-3f * tmin;
   return true;
@@ -408,12 +420,25 @@ bool Heightfield2::IntersectP(const Ray &r) const {
   }
 
   for (;;) {
+#if PHONG_INTERPOLATION
     for (int k = 0; k < 2; ++k) {
       float t;
-      if (jiao_tri(impl, ray, impl->tri[coord[1]][coord[0]*2+k], &t)) {
+      if (jiao_tri(impl, ray, impl->tri[coord[1]][coord[0]*2+k], &t))
         return true;
-      }
     }
+#else
+    float t;
+    const int &y = coord[1], &x = coord[0];
+    if (jiao_tri(impl, ray, y,   x,
+                            y,   x+1,
+                            y+1, x+1, &t)
+     || jiao_tri(impl, ray, y,   x,
+                            y+1, x+1,
+                            y+1, x, &t))
+    {
+      return true;
+    }
+#endif
     int cmp_res = ((t_nxt[0]>=t_nxt[1])<<2)
                 | ((t_nxt[0]>=t_nxt[2])<<1)
                 | (t_nxt[1]>=t_nxt[2]);
@@ -446,6 +471,7 @@ void Heightfield2::GetShadingGeometry(
   const DifferentialGeometry &dg,
   DifferentialGeometry *dgShading) const
 {
+#if PHONG_INTERPOLATION
   const int ty = static_cast<int>(dg.v*(impl->ny-1) + EPS);
   const int x = static_cast<int>(dg.u*(impl->nx-1) + EPS);
   const int tx = static_cast<int>(x*2 + (dg.u - x*impl->dx <= dg.v - ty*impl->dy));
@@ -475,6 +501,9 @@ void Heightfield2::GetShadingGeometry(
   const Vector v = Cross(u, n);
   dgShading->dpdu = u;
   dgShading->dpdv = v;
+#endif
+#else
+  *dgShading = dg;
 #endif
 }
 
