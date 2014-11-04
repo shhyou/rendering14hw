@@ -101,7 +101,8 @@ Heightfield2::Heightfield2(const Transform *o2w, const Transform *w2o,
                   , &pt1 = impl->pt[COORD(_pt[1].first, _pt[1].second)]
                   , &pt2 = impl->pt[COORD(_pt[2].first, _pt[2].second)];
         const Vector ntri {Cross(pt1-pt0, pt2-pt0)};
-        const Vector dpdu {ntri.z,0,-ntri.x}, dpdv {0,ntri.z,-ntri.y};
+        const float z_inv = 1.0f/ntri.z;
+        const Vector dpdu {1,0,-ntri.x*z_inv}, dpdv {0,1,-ntri.y*z_inv};
         impl->tri_dg.back().emplace_back(Point(), real_o2w(dpdu), real_o2w(dpdv),
                                                   real_o2w(dndu), real_o2w(dndv),
                                                   -1.f, -1.f, this);
@@ -334,10 +335,11 @@ bool Heightfield2::Intersect(
 
   if (!hit) return false;
 
+  const Point pt {ray(tmin)};
   *dg = impl->tri_dg[argtri[0]][argtri[1]];
-  dg->p = (*ObjectToWorld)(ray(tmin));
-  dg->u = argtri[0];
-  dg->v = argtri[1];
+  dg->p = (*ObjectToWorld)(pt);
+  dg->u = pt.x;
+  dg->v = pt.y;
   *tHit = tmin;
   *rayEpsilon = 1e-3f * tmin;
   return true;
@@ -444,8 +446,9 @@ void Heightfield2::GetShadingGeometry(
   const DifferentialGeometry &dg,
   DifferentialGeometry *dgShading) const
 {
-  const int ty = static_cast<int>(dg.u + 0.1f);
-  const int tx = static_cast<int>(dg.v + 0.1f);
+  const int ty = static_cast<int>(dg.v*(impl->ny-1) + EPS);
+  const int x = static_cast<int>(dg.u*(impl->nx-1) + EPS);
+  const int tx = static_cast<int>(x*2 + (dg.u - x*impl->dx <= dg.v - ty*impl->dy));
   const vector<pair<int,int>> &_pt = impl->tri[ty][tx];
   const Point &p0 = o2w(impl->pt[COORD(_pt[0].first, _pt[0].second)])
             , &p1 = o2w(impl->pt[COORD(_pt[1].first, _pt[1].second)])
