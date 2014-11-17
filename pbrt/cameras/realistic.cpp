@@ -48,7 +48,7 @@ RealisticCamera::RealisticCamera(
       if (s[0] == '#') continue;
       float radius, axpos, n, aperture;
       sscanf(s.c_str(), "%f%f%f%f", &radius, &axpos, &n, &aperture);
-      impl->lenses.push_back({radius, axpos,n, aperture});
+      impl->lenses.push_back({radius, axpos, n, aperture});
 #if 0
       if (ifz(radius) && ifz(n))
         impl->R = aperture;
@@ -61,7 +61,7 @@ RealisticCamera::RealisticCamera(
   }
 }
 
-bool sphere_intersect(const float& rad, const float& zcenter, const Ray &r, float* t) {
+static inline bool sphere_intersect(const float& rad, const float& zcenter, const Ray &r, float* t) {
   const float A = r.d.x*r.d.x + r.d.y*r.d.y + r.d.z*r.d.z;
   const float B = 2*(r.d.x*r.o.x + r.d.y*r.o.y + r.d.z*(r.o.z - zcenter));
   const float C = r.o.x*r.o.x + r.o.y*r.o.y + (r.o.z-zcenter)*(r.o.z-zcenter)
@@ -71,6 +71,26 @@ bool sphere_intersect(const float& rad, const float& zcenter, const Ray &r, floa
     return false;
 
   *t = rad >= 0? t1 : t0;
+  return true;
+}
+
+static inline bool refraction(
+  const Ray& r,
+  const Point& pt,
+  const Vector& _normal, /* normal vector of the plane */
+  const float n_prv,
+  const float n,
+  Ray *r_new)
+{
+  const Vector d {Normalize(r.d)};
+  const Vector normal {Dot(d, _normal)/Dot(_normal, _normal)*_normal};
+  const Vector dir {d - normal};
+  const float cos_thetai = Dot(d, normal)/Dot(normal, normal);
+  const float sin_thetai = sqrt(1 - cos_thetai*cos_thetai);
+  const float sin_thetao = sin_thetai * n_prv / n;
+  const float cos_thetao = sqrt(1 - sin_thetao*sin_thetao);
+  const Vector dir_out {sin_thetao*cos_thetai/(sin_thetai*cos_thetao)*dir};
+  *r_new = {pt, normal + dir_out, 0.0f, std::numeric_limits<float>::max()};
   return true;
 }
 
@@ -95,17 +115,33 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
   lensV *= impl->R;
 
   const Point psample {lensU, lensV, 0.0};
-  float z {0}; 
+  float z {0}, n_prv {1.0f};
 
   Ray r {pimg, Normalize(psample - pimg), 0., std::numeric_limits<float>::max()};
   for (auto it = impl->lenses.rbegin(); it != impl->lenses.rend(); ++it) {
     z += it->axpos;
     float t;
 
-    if (!sphere_intersect(it->radius, z - it->radius, r, &t))
+    // TODO: fixme: handle aperture
+    if (ifz(it->radius)) {
+      n_prv = 1.0f;
+      continue;
+    }
+
+    const float zcenter = z - it->radius;
+    if (!sphere_intersect(it->radius, zcenter, r, &t))
       return 0.0;
 
-    const Point pt = r(t);
+    const Point pt {r(t)};
+    if (pt.z >= it->aperture/2.0f || pt.z <= -it->aperture/2.0f)
+      return 0.0;
+
+    Ray r_new;
+    if (!refraction(r, pt, Normalize(pt - Point {0,0,zcenter}), n_prv, it->n, &r_new))
+      return 0.0;
+
+    r = r_new;
+    n_prv = it->n;
   }
 
   *ray = CameraToWorld(r);
