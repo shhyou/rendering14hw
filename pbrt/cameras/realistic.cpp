@@ -5,6 +5,7 @@
 #include "sampler.h"
 #include "cameras/realistic.h"
 
+#include <cassert>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -13,7 +14,7 @@
 #include <limits>
 #include <stdexcept>
 
-static constexpr float EPS = 1e-6;
+static constexpr float EPS = 1e-6, PI = acos(-1.f);
 static constexpr bool ifz(float f) { return -EPS<f && f<EPS; }
 
 struct lens_t {
@@ -25,8 +26,8 @@ struct lens_t {
 
 struct RealisticCamer_Impl {
   const Film * const film;
-  float film_dist, film_diag, aper_diam;
-  float R;
+  const float film_diag, aper_diam;
+  float R, film_z;
   vector<lens_t> lenses;
 };
 
@@ -37,7 +38,7 @@ RealisticCamera::RealisticCamera(
   float filmdistance, float aperture_diameter, string specfile, 
   float filmdiag, Film *f)
   : Camera(cam2world, sopen, sclose, f),
-    impl(new RealisticCamer_Impl {f, filmdistance, filmdiag, aperture_diameter})
+    impl(new RealisticCamer_Impl {f, filmdiag, aperture_diameter})
 {
   {
     std::ifstream fspec(specfile);
@@ -57,8 +58,14 @@ RealisticCamera::RealisticCamera(
 #endif
     }
     fspec.close();
-    fprintf(stderr, "[+] Read %u lens(es).\n", impl->lenses.size());
   }
+  impl->lenses.back().axpos = filmdistance;
+  impl->film_z = 0;
+  for (const lens_t& lens : impl->lenses)
+    impl->film_z -= lens.axpos;
+
+  fprintf(stderr, "[+] Read %u lens(es).\n", impl->lenses.size());
+  fprintf(stderr, "[ ] dist = %f, z = %f, diag = %f, R = %f\n", filmdistance, impl->film_z,impl->film_diag, impl->R);
 }
 
 static inline bool sphere_intersect(const float& rad, const float& zcenter, const Ray &r, float* t) {
@@ -71,6 +78,7 @@ static inline bool sphere_intersect(const float& rad, const float& zcenter, cons
     return false;
 
   *t = rad >= 0? t1 : t0;
+//  return *t >= 0;
   return true;
 }
 
@@ -82,6 +90,7 @@ static inline bool refraction(
   const float n,
   Ray *r_new)
 {
+  assert(!ifz(n) && !ifz(n_prv));
   const Vector d {Normalize(r.d)};
   const Vector normal {Dot(d, _normal)/Dot(_normal, _normal)*_normal};
   const Vector dir {d - normal};
@@ -103,7 +112,7 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
 
   const Point pimg { (sample.imageX - impl->film->xResolution/2.0f)*reso_scale
                    , (sample.imageY - impl->film->yResolution/2.0f)*reso_scale
-                   , -impl->film_dist };
+                   , impl->film_z };
 
   float lensU, lensV;
 #if 1
@@ -114,10 +123,12 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
   lensU *= impl->R;
   lensV *= impl->R;
 
-  const Point psample {lensU, lensV, 0.0};
-  float z {0}, n_prv {1.0f};
+  const Point psample {lensU, lensV, impl->film_z + impl->lenses.back().axpos};
+  float z {impl->film_z}, n_prv {1.0f};
+  const Vector d0 {Normalize(psample - pimg)};
 
-  Ray r {pimg, Normalize(psample - pimg), 0., std::numeric_limits<float>::max()};
+//  fprintf(stderr, "generate ray: ");
+  Ray r {pimg, d0, 0., std::numeric_limits<float>::max()};
   for (auto it = impl->lenses.rbegin(); it != impl->lenses.rend(); ++it) {
     z += it->axpos;
     float t;
@@ -129,23 +140,33 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
     }
 
     const float zcenter = z - it->radius;
-    if (!sphere_intersect(it->radius, zcenter, r, &t))
+    if (!sphere_intersect(it->radius, zcenter, r, &t)) {
+//      fprintf(stderr, "No intersection\n");
       return 0.0;
+    }
 
     const Point pt {r(t)};
-    if (pt.z >= it->aperture/2.0f || pt.z <= -it->aperture/2.0f)
+    if (pt.z >= it->aperture/2.0f || pt.z <= -it->aperture/2.0f) {
+//      fprintf(stderr, "Out of aperture\n");
       return 0.0;
+    }
 
     Ray r_new;
-    if (!refraction(r, pt, Normalize(pt - Point {0,0,zcenter}), n_prv, it->n, &r_new))
+    if (!refraction(r, pt, Normalize(pt - Point {0,0,zcenter}), n_prv, it->n, &r_new)) {
+//      fprintf(stderr, "Impossible: refraction\n");
       return 0.0;
+    }
 
     r = r_new;
     n_prv = it->n;
   }
+//  fprintf(stderr, "\n");
 
   *ray = CameraToWorld(r);
-  return 1.0;
+
+  const float cos_theta = Dot(d0, Vector  {0,0,1});
+  return PI * impl->R * impl->R * pow(cos_theta,4.f)
+       / (impl->lenses.back().axpos * impl->lenses.back().axpos);
 }
 
 
