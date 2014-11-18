@@ -62,6 +62,7 @@ RealisticCamera::RealisticCamera(
     }
     fspec.close();
   }
+  assert(ifz(impl->lenses.back().axpos));
   impl->lenses.back().axpos = filmdistance;
   impl->film_z = 0;
   for (const lens_t& lens : impl->lenses)
@@ -84,14 +85,8 @@ static inline bool sphere_intersect(const float& rad, const float& zcenter, cons
   if (rad >= 0)
     std::swap(ts[0], ts[1]);
 
-  for (int i = 0; i < 2; ++i) {
-    if (r.mint <= ts[i] && ts[i] <= r.maxt) {
-      *t = ts[i];
-      return true;
-    }
-  }
-
-  return false;
+  *t = ts[0];
+  return r.mint<=ts[0] && ts[0]<=r.maxt;
 }
 
 static inline bool refraction(
@@ -112,9 +107,11 @@ static inline bool refraction(
     normal.x,normal.y,normal.z);
   fprintf(stderr, "        dir=(%f,%f,%f)\n", dir.x,dir.y,dir.z);
 #endif
-  const float cos_thetai = Dot(d, normal)/sqrt(std::max(0.f, Dot(normal, normal))
+  const float cos_thetai = Dot(d, normal)/sqrt(Dot(normal, normal));
   const float sin_thetai = sqrt(1 - cos_thetai*cos_thetai);
   const float sin_thetao = sin_thetai * n_prv / n;
+  if (sin_thetao > 1.f)
+    return false;
   const float cos_thetao = sqrt(1 - sin_thetao*sin_thetao);
 #if VERBOSE_
   fprintf(stderr, "        cos_i=%f,sin_i=%f,cos_o=%f,sin_o=%f\n",cos_thetai,sin_thetai,cos_thetao,sin_thetao);
@@ -131,7 +128,7 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
 
   const float reso_scale {impl->film_diag / reso_diag};
 
-  const Point pimg { (sample.imageX - impl->film->xResolution/2.0f)*reso_scale
+  const Point pimg { -(sample.imageX - impl->film->xResolution/2.0f)*reso_scale
                    , (sample.imageY - impl->film->yResolution/2.0f)*reso_scale
                    , impl->film_z };
 
@@ -145,7 +142,7 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
   lensV *= impl->R;
 
   const Point psample {lensU, lensV, impl->film_z + impl->lenses.back().axpos};
-  float z {impl->film_z}, n_prv {1.0f};
+  float z {impl->film_z}, n_cur, n_nxt;
   const Vector d0 {Normalize(psample - pimg)};
 
   Ray r {pimg, d0, 0., std::numeric_limits<float>::max()};
@@ -162,7 +159,6 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
 
     // TODO: fixme: handle aperture
     if (ifz(it->radius)) {
-      n_prv = 1.0f;
       continue;
     }
 
@@ -187,7 +183,7 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
 #endif
 
 #if 1
-    float dist = pt.x*pt.x + pt.y*pt.y, apt = it->aperture*it->aperture/4.0f;
+    const float dist = pt.x*pt.x + pt.y*pt.y, apt = it->aperture*it->aperture/4.0f;
     if (dist > apt) {
 #if VERBOSE_
       fprintf(stderr, "    Out of aperture\n");
@@ -198,9 +194,13 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
 #endif
 
     Ray r_new;
-    if (!refraction(r, pt, Normalize(pt - Point {0,0,zcenter}), n_prv, it->n, &r_new)) {
+    n_cur = it->n;
+    n_nxt = it+1==impl->lenses.rend()? 1.0 : (it+1)->n;
+    if (ifz(n_cur)) n_cur = 1;
+    if (ifz(n_nxt)) n_nxt = 1;
+    if (!refraction(r, pt, pt - Point {0,0,zcenter}, n_cur, n_nxt, &r_new)) {
 #if VERBOSE_
-      fprintf(stderr, "    Impossible: refraction\n");
+      fprintf(stderr, "    Refraction\n");
       getchar();
 #endif
       return 0.0;
@@ -210,7 +210,7 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
     fprintf(stderr, "    ray => (%f,%f,%f)\n", r_new.d.x, r_new.d.y, r_new.d.z);
 #endif
     r = r_new;
-    n_prv = it->n;
+    assert(Dot(r.d, Vector {0,0,1}) > 0);
   }
 
   *ray = CameraToWorld(r);
@@ -220,7 +220,7 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
   getchar();
 #endif
   return PI * impl->R * impl->R * pow(cos_theta,4.f)
-       / (impl->lenses.back().axpos * impl->lenses.back().axpos);
+       / ((impl->lenses.back().axpos + impl->film_z) * (impl->lenses.back().axpos + impl->film_z));
 }
 
 
