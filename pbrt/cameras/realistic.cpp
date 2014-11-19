@@ -15,8 +15,6 @@
 #include <stdexcept>
 #include <algorithm>
 
-#define VERBOSE_ 0
-
 static constexpr float EPS = 1e-6, PI = acos(-1.f);
 static constexpr bool ifz(float f) { return -EPS<f && f<EPS; }
 
@@ -104,21 +102,12 @@ static inline bool refraction(
   const Vector d {Normalize(r.d)};
   const Vector normal {Dot(d, _normal)/Dot(_normal, _normal)*_normal};
   const Vector dir {d - normal};
-#if VERBOSE_
-  fprintf(stderr, "        d=(%f,%f,%f) normal=(%f,%f,%f)\n",
-    d.x,d.y,d.z,
-    normal.x,normal.y,normal.z);
-  fprintf(stderr, "        dir=(%f,%f,%f)\n", dir.x,dir.y,dir.z);
-#endif
   const float cos_thetai = Dot(d, normal)/sqrt(Dot(normal, normal));
   const float sin_thetai = sqrt(1 - cos_thetai*cos_thetai);
   const float sin_thetao = sin_thetai * n_prv / n;
   if (sin_thetao > 1.f)
     return false;
   const float cos_thetao = sqrt(1 - sin_thetao*sin_thetao);
-#if VERBOSE_
-  fprintf(stderr, "        cos_i=%f,sin_i=%f,cos_o=%f,sin_o=%f\n",cos_thetai,sin_thetai,cos_thetao,sin_thetao);
-#endif
   const Vector dir_out {n_prv*cos_thetai/(n*cos_thetao)*dir};
   *r_new = {pt, normal + dir_out, 0.0f, std::numeric_limits<float>::max()};
   return true;
@@ -150,12 +139,6 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
 
   Ray r {pimg, d0, 0., std::numeric_limits<float>::max()};
 
-#if VERBOSE_
-  fprintf(stderr, "resolution scale: %f; p0: (%f, %f, %f)\n", reso_scale, pimg.x, pimg.y, pimg.z);
-  fprintf(stderr, "(u,v) = (%f,%f); p1 = (%f,%f,%f)\n", sample.lensU, sample.lensV, psample.x, psample.y, psample.z);
-  fprintf(stderr, "ray => (%f, %f, %f)\n", r.d.x, r.d.y, r.d.z);
-#endif
-
   for (auto it = impl->lenses.rbegin(); it != impl->lenses.rend(); ++it) {
     z += it->axpos;
 
@@ -172,62 +155,29 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
 
     const float zcenter = z - it->radius;
 
-#if VERBOSE_
-    fprintf(stderr, "    z = %f, zcenter = %f\n", z, zcenter);
-#endif
-
     float t;
-    if (!sphere_intersect(it->radius, zcenter, r, &t)) {
-#if VERBOSE_
-      fprintf(stderr, "    No intersection\n");
-      getchar();
-#endif
+    if (!sphere_intersect(it->radius, zcenter, r, &t))
       return 0.0;
-    }
 
     const Point pt {r(t)};
-
-#if VERBOSE_
-    fprintf(stderr, "    t = %f, (%f,%f,%f)\n", t, pt.x, pt.y, pt.z);
-#endif
-
-#if 1
     const float dist = pt.x*pt.x + pt.y*pt.y, apt = it->aperture*it->aperture/4.0f;
-    if (dist > apt) {
-#if VERBOSE_
-      fprintf(stderr, "    Out of aperture\n");
-      getchar();
-#endif
+    if (dist > apt)
       return 0.0;
-    }
-#endif
 
     Ray r_new;
     n_cur = it->n;
     n_nxt = it+1==impl->lenses.rend()? 1.0 : (it+1)->n;
     if (ifz(n_cur)) n_cur = 1;
     if (ifz(n_nxt)) n_nxt = 1;
-    if (!refraction(r, pt, pt - Point {0,0,zcenter}, n_cur, n_nxt, &r_new)) {
-#if VERBOSE_
-      fprintf(stderr, "    Refraction\n");
-      getchar();
-#endif
+    if (!refraction(r, pt, pt - Point {0,0,zcenter}, n_cur, n_nxt, &r_new))
       return 0.0;
-    }
 
-#if VERBOSE_
-    fprintf(stderr, "    ray => (%f,%f,%f)\n", r_new.d.x, r_new.d.y, r_new.d.z);
-#endif
     r = r_new;
-    assert(Dot(r.d, Vector {0,0,1}) > 0);
   }
 
   *ray = CameraToWorld(r);
 
   const float cos_theta = Dot(d0, Vector {0,0,1});
-#if VERBOSE_
-  getchar();
-#endif
   return PI * impl->R * impl->R * pow(cos_theta,4.f)
        / (impl->lenses.back().axpos * impl->lenses.back().axpos);
 }
