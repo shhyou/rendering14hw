@@ -53,15 +53,18 @@ RealisticCamera::RealisticCamera(
       float radius, axpos, n, aperture;
       sscanf(s.c_str(), "%f%f%f%f", &radius, &axpos, &n, &aperture);
       impl->lenses.push_back({radius, axpos, n, aperture});
+      if (ifz(radius) && ifz(n) && aperture_diameter<aperture)
+        aperture = aperture_diameter;
 #if 0
       if (ifz(radius) && ifz(n))
-        impl->R = aperture;
+        impl->R = aperture/2.0f;
 #else
       impl->R = aperture/2.0f; /* sample on the last lens */
 #endif
     }
     fspec.close();
   }
+
   assert(ifz(impl->lenses.back().axpos));
   impl->lenses.back().axpos = filmdistance;
   impl->film_z = 0;
@@ -155,10 +158,15 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
 
   for (auto it = impl->lenses.rbegin(); it != impl->lenses.rend(); ++it) {
     z += it->axpos;
-    float t;
 
     // TODO: fixme: handle aperture
     if (ifz(it->radius)) {
+      /* (r.o + t*r.d)*n = z */
+      const float t = (z - r.o.z)/r.d.z;
+      const Point pt {r(t)};
+      const float dist = pt.x*pt.x + pt.y*pt.y, apt = it->aperture*it->aperture/4.0f;
+      if (dist > apt)
+        return 0.0;
       continue;
     }
 
@@ -168,6 +176,7 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
     fprintf(stderr, "    z = %f, zcenter = %f\n", z, zcenter);
 #endif
 
+    float t;
     if (!sphere_intersect(it->radius, zcenter, r, &t)) {
 #if VERBOSE_
       fprintf(stderr, "    No intersection\n");
@@ -220,7 +229,7 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
   getchar();
 #endif
   return PI * impl->R * impl->R * pow(cos_theta,4.f)
-       / ((impl->lenses.back().axpos + impl->film_z) * (impl->lenses.back().axpos + impl->film_z));
+       / (impl->lenses.back().axpos * impl->lenses.back().axpos);
 }
 
 
