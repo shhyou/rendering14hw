@@ -143,6 +143,8 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
   const Vector d0 {Normalize(psample - pimg)};
 
   Ray r {pimg, d0, 0., std::numeric_limits<float>::max()};
+  Vector normal;
+  Point pt;
 
   for (auto it = impl->lenses.rbegin(); it != impl->lenses.rend(); ++it) {
     z += it->axpos;
@@ -150,28 +152,27 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
     if (ifz(it->radius)) {
       /* (r.o + t*r.d)*n = z */
       const float t = (z - r.o.z)/r.d.z;
-      const Point pt {r(t)};
+      pt = {r(t)};
       const float dist = pt.x*pt.x + pt.y*pt.y;
       if (dist > it->R2)
         return 0.0;
-      continue;
+      normal = {0,0,1};
+    } else {
+      const float zcenter = z - it->radius;
+
+      float t;
+      if (!sphere_intersect(it->radius, zcenter, r, &t))
+        return 0.0;
+
+      pt = {r(t)};
+      const float dist = pt.x*pt.x + pt.y*pt.y;
+      if (dist > it->R2)
+        return 0.0;
+      normal = pt - Point {0,0,zcenter};
     }
-
-    const float zcenter = z - it->radius;
-
-    float t;
-    if (!sphere_intersect(it->radius, zcenter, r, &t))
-      return 0.0;
-
-    const Point pt {r(t)};
-    const float dist = pt.x*pt.x + pt.y*pt.y;
-    if (dist > it->R2)
-      return 0.0;
-
     Ray r_new;
-    if (!refraction(r, pt, pt - Point {0,0,zcenter}, it->n_ratio, &r_new))
+    if (!refraction(r, pt, normal, it->n_ratio, &r_new))
       return 0.0;
-
     r = r_new;
   }
 
