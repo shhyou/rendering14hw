@@ -1,4 +1,3 @@
-
 #include "stdafx.h"
 #include "film.h"
 #include "montecarlo.h"
@@ -125,7 +124,7 @@ float RealisticCamera::GenerateRay(const CameraSample &sample, Ray *ray) const {
                    , impl->film_z };
 
   float lensU, lensV;
-#if 1
+#if 0
   UniformSampleDisk(sample.lensU, sample.lensV, &lensU, &lensV);
 #else
   ConcentricSampleDisk(sample.lensU, sample.lensV, &lensU, &lensV);
