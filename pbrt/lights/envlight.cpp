@@ -45,7 +45,7 @@
 #include <limits>
 #include <functional>
 
-#define DEBUG 1
+#define DEBUG 0
 
 using std::vector;
 
@@ -98,7 +98,7 @@ static void subdivide(MedCutEnvImpl *impl, int npow, RGBSpectrum texels[], const
 fprintf(stderr, "%3d: (%d,%d,%d,%d)\n", npow, left, top, right, bottom);
 #endif
 
-  if (npow == impl->ns || (left==right && top==bottom)) {
+  if (npow == impl->ns) {
     RGBSpectrum s;
     for (int y = top; y <= bottom; ++y)
       for (int x = left; x <= right; ++x)
@@ -115,7 +115,10 @@ fprintf(stderr, "    add [%d,%d]*[%d,%d], ", left, right, top, bottom);
   const auto sum = [&acc](const int l, const int t, const int r, const int b) -> float {
     return acc[b+1][r+1] - acc[b+1][l] - acc[t][r+1] + acc[t][l];
   };
-  if (right-left >= bottom-top) {
+  if (left==right && top==bottom) {
+    subdivide(impl, npow*2, texels, acc, left, top, right, bottom);
+    subdivide(impl, npow*2, texels, acc, left, top, right, bottom);
+  } else if (right-left >= bottom-top) {
     int best_x = left;
     float best_abs = std::numeric_limits<float>::max();
     for (int x = left; x < right; ++x) {
@@ -175,8 +178,8 @@ MedianCutEnvironmentLight::MedianCutEnvironmentLight(const Transform &light2worl
               , phi   = impl->inv_w*cx * 2.f * M_PI;
     const float costheta = cosf(theta), sintheta = sinf(theta);
     const float sinphi = sinf(phi), cosphi = cosf(phi);
-    const Vector wi(-sintheta*cosphi, -sintheta*sinphi, -costheta);
-    p.AddVector(string("to"), &wi, 1);
+    const Point wi(-sintheta*cosphi, -sintheta*sinphi, -costheta);
+    p.AddPoint(string("to"), &wi, 1);
 
 #if DEBUG
 fprintf(stderr, "rgb (%f,%f,%f)\n", rgb[0], rgb[1], rgb[2]);
@@ -208,7 +211,7 @@ fprintf(stderr, "rgb (%f,%f,%f)\n", rgb[0], rgb[1], rgb[2]);
   // initialize median cut
   fprintf(stderr, "[+] [%10.2f] Calculating median cut\n", clock()*1.0/CLOCKS_PER_SEC);
   subdivide(this->impl, 1, texels, acc, 0, 0, width-1, height-1);
-  fprintf(stderr, "[+] [%10.2f] Done\n", clock()*1.0/CLOCKS_PER_SEC);
+  fprintf(stderr, "[+] [%10.2f] Done %d\n", clock()*1.0/CLOCKS_PER_SEC, static_cast<int>(impl->ls.size()));
 
   delete[] texels;
 
@@ -323,10 +326,15 @@ MedianCutEnvironmentLight *CreateMedianCutEnvironmentLight(const Transform &ligh
 Spectrum MedianCutEnvironmentLight::Sample_L(const Point &p, float pEpsilon,
     const LightSample &ls, float time, Vector *wi, float *pdf,
     VisibilityTester *visibility) const {
-
   DistantLight *dl = impl->ls[Floor2Int(ls.uComponent * impl->ns)];
   Spectrum Ls(dl->Sample_L(p, pEpsilon, ls, time, wi, pdf, visibility), SPECTRUM_ILLUMINANT);
   *pdf = *pdf / impl->ns;
+
+#if DEBUG
+fprintf(stderr, "Sample %f, (%f,%f,%f)\n", *pdf, (*wi)[0], (*wi)[1], (*wi)[2]);
+getchar();
+#endif
+
   return Ls;
 }
 
