@@ -76,6 +76,7 @@
 #include "lights/point.h"
 #include "lights/projection.h"
 #include "lights/spot.h"
+#include "lights/envlight.h"
 #include "materials/glass.h"
 #include "materials/kdsubsurface.h"
 #include "materials/matte.h"
@@ -499,6 +500,8 @@ Light *MakeLight(const string &name,
         light = CreateDistantLight(light2world, paramSet);
     else if (name == "infinite" || name == "exinfinite")
         light = CreateInfiniteLight(light2world, paramSet);
+    else if (name == "mediancut")
+        light = CreateMedianCutEnvironmentLight(light2world, paramSet);
     else
         Warning("Light \"%s\" unknown.", name.c_str());
     paramSet.ReportUnused();
