@@ -40,11 +40,28 @@
 #include "imageio.h"
 #include "mipmap.h"
 
+#include <ctime>
+#include <vector>
+#include <limits>
+#include <functional>
+
+#define DEBUG 1
+
+using std::vector;
+
+static int nLights = 1;
+
 // MedianCutEnvironmentLight private implementation
 struct MedCutEnvImpl {
   // MedianCutEnvironmentLight Private Data
   MIPMap<RGBSpectrum> *radianceMap;
   Distribution2D *distribution;
+  int ns;
+  int width, height;
+  float inv_w, inv_h;
+  float solid_angle;
+  std::function<DistantLight*(const RGBSpectrum&, float, float)> createDistantLight;
+  vector<DistantLight*> ls; // bad smell, should at least use `unique_ptr`
 };
 
 // MedianCutEnvironmentLight Utility Classes
@@ -69,12 +86,65 @@ struct MedianCutEnvironmentCube {
 MedianCutEnvironmentLight::~MedianCutEnvironmentLight() {
   delete impl->distribution;
   delete impl->radianceMap;
+  for (auto light : impl->ls)
+    delete light;
+  delete impl;
 }
 
+static void subdivide(MedCutEnvImpl *impl, int npow, RGBSpectrum texels[], const vector<vector<float>>& acc,
+               int left, int top, int right, int bottom)
+{
+#if DEBUG
+fprintf(stderr, "%3d: (%d,%d,%d,%d)\n", npow, left, top, right, bottom);
+#endif
+
+  if (npow == impl->ns || (left==right && top==bottom)) {
+    RGBSpectrum s;
+    for (int y = top; y <= bottom; ++y)
+      for (int x = left; x <= right; ++x)
+        s += texels[y*impl->width + x];
+
+#if DEBUG
+fprintf(stderr, "    add [%d,%d]*[%d,%d], ", left, right, top, bottom);
+#endif
+
+    impl->ls.push_back(impl->createDistantLight(s, 0.5f*(top+bottom), 0.5f*(left+right)));
+
+    return;
+  }
+  const auto sum = [&acc](const int l, const int t, const int r, const int b) -> float {
+    return acc[b+1][r+1] - acc[b+1][l] - acc[t][r+1] + acc[t][l];
+  };
+  if (right-left >= bottom-top) {
+    int best_x = left;
+    float best_abs = std::numeric_limits<float>::max();
+    for (int x = left; x < right; ++x) {
+      const float diff = fabs(sum(left, top, x, bottom) - sum(x+1, top, right, bottom));
+      if (diff < best_abs) {
+        best_abs = diff;
+        best_x = x;
+      }
+    }
+    subdivide(impl, npow*2, texels, acc, left, top, best_x, bottom);
+    subdivide(impl, npow*2, texels, acc, best_x+1, top, right, bottom);
+  } else {
+    int best_y = top;
+    float best_abs = std::numeric_limits<float>::max();
+    for (int y = top; y < bottom; ++y) {
+      const float diff = fabs(sum(left, top, right, y) - sum(left, y+1, right, bottom));
+      if (diff < best_abs) {
+        best_abs = diff;
+        best_y = y;
+      }
+    }
+    subdivide(impl, npow*2, texels, acc, left, top, right, best_y);
+    subdivide(impl, npow*2, texels, acc, left, best_y+1, right, bottom);
+  }
+}
 
 MedianCutEnvironmentLight::MedianCutEnvironmentLight(const Transform &light2world,
-    const Spectrum &L, int ns, const string &texmap)
-  : Light(light2world, ns) {
+    const Spectrum &L, int ns_, const string &texmap)
+  : Light(light2world, ns_), impl(new MedCutEnvImpl {nullptr, nullptr, nLights}) {
   int width = 0, height = 0;
   RGBSpectrum *texels = NULL;
   // Read texel data from _texmap_ into _texels_
@@ -90,9 +160,59 @@ MedianCutEnvironmentLight::MedianCutEnvironmentLight(const Transform &light2worl
     texels[0] = L.ToRGBSpectrum();
   }
   impl->radianceMap = new MIPMap<RGBSpectrum>(width, height, texels);
-  delete[] texels;
-  // Initialize sampling PDFs for environment area light
+  impl->width = width;
+  impl->inv_w = 1.0f/(width-1);
+  impl->height = height;
+  impl->inv_h = 1.0f/(height-1);
+  impl->createDistantLight = [this](const RGBSpectrum& s, float cy, float cx) {
+    ParamSet p;
 
+    float rgb[3];
+    s.ToRGB(rgb);
+    p.AddRGBSpectrum("L", rgb, 3);
+
+    const float theta = impl->inv_h*cy * M_PI
+              , phi   = impl->inv_w*cx * 2.f * M_PI;
+    const float costheta = cosf(theta), sintheta = sinf(theta);
+    const float sinphi = sinf(phi), cosphi = cosf(phi);
+    const Vector wi(-sintheta*cosphi, -sintheta*sinphi, -costheta);
+    p.AddVector(string("to"), &wi, 1);
+
+#if DEBUG
+fprintf(stderr, "rgb (%f,%f,%f)\n", rgb[0], rgb[1], rgb[2]);
+#endif
+
+    return CreateDistantLight(this->LightToWorld, p);
+  };
+
+  impl->solid_angle = ((2.f * M_PI) / (width - 1)) * (M_PI / (1.f * (height - 1)));
+
+  for (int y = 0; y < height; ++y) {
+    float sinTheta = sinf(M_PI * float(y + 0.5f)/height);
+    for (int x = 0; x < width; ++x)
+      texels[y*width + x] *= impl->solid_angle * sinTheta;
+  }
+
+  // Initialize energy sum array; the array is shifted for (1,1)
+  // i.e. (0,*) and (*,0) are inserted 0-boundaries
+  fprintf(stderr, "[+] [%10.2f] Initializing sum array\n", clock()*1.0/CLOCKS_PER_SEC);
+
+  vector<vector<float>> acc(height+1, vector<float>(width+1, 0.f));
+  for (int y = 0; y < height; ++y)
+    for (int x = 0; x < width; ++x)
+      acc[y+1][x+1] = acc[y+1][x] + texels[y*width + x].y();
+  for (int x = 1; x <= width; ++x)
+    for (int y = 1; y <= height; ++y)
+      acc[y][x] += acc[y][x-1];
+
+  // initialize median cut
+  fprintf(stderr, "[+] [%10.2f] Calculating median cut\n", clock()*1.0/CLOCKS_PER_SEC);
+  subdivide(this->impl, 1, texels, acc, 0, 0, width-1, height-1);
+  fprintf(stderr, "[+] [%10.2f] Done\n", clock()*1.0/CLOCKS_PER_SEC);
+
+  delete[] texels;
+
+  // Initialize sampling PDFs for environment area light
   // Compute scalar-valued image _img_ from environment map
   float filter = 1.f / max(width, height);
   float *img = new float[width*height];
@@ -194,6 +314,7 @@ MedianCutEnvironmentLight *CreateMedianCutEnvironmentLight(const Transform &ligh
   Spectrum sc = paramSet.FindOneSpectrum("scale", Spectrum(1.0));
   string texmap = paramSet.FindOneFilename("mapname", "");
   int nSamples = paramSet.FindOneInt("nsamples", 1);
+  nLights = paramSet.FindOneInt("nlights", 4);
   if (PbrtOptions.quickRender) nSamples = max(1, nSamples / 4);
   return new MedianCutEnvironmentLight(light2world, L * sc, nSamples, texmap);
 }
@@ -202,26 +323,10 @@ MedianCutEnvironmentLight *CreateMedianCutEnvironmentLight(const Transform &ligh
 Spectrum MedianCutEnvironmentLight::Sample_L(const Point &p, float pEpsilon,
     const LightSample &ls, float time, Vector *wi, float *pdf,
     VisibilityTester *visibility) const {
-  // Find $(u,v)$ sample coordinates in environment light texture
-  float uv[2], mapPdf;
-  impl->distribution->SampleContinuous(ls.uPos[0], ls.uPos[1], uv, &mapPdf);
-  if (mapPdf == 0.f) return 0.f;
 
-  // Convert environment light sample point to direction
-  float theta = uv[1] * M_PI, phi = uv[0] * 2.f * M_PI;
-  float costheta = cosf(theta), sintheta = sinf(theta);
-  float sinphi = sinf(phi), cosphi = cosf(phi);
-  *wi = LightToWorld(Vector(sintheta * cosphi, sintheta * sinphi,
-                costheta));
-
-  // Compute PDF for sampled environment light direction
-  *pdf = mapPdf / (2.f * M_PI * M_PI * sintheta);
-  if (sintheta == 0.f) *pdf = 0.f;
-
-  // Return radiance value for environment light direction
-  visibility->SetRay(p, pEpsilon, *wi, time);
-  Spectrum Ls = Spectrum(impl->radianceMap->Lookup(uv[0], uv[1]),
-               SPECTRUM_ILLUMINANT);
+  DistantLight *dl = impl->ls[Floor2Int(ls.uComponent * impl->ns)];
+  Spectrum Ls(dl->Sample_L(p, pEpsilon, ls, time, wi, pdf, visibility), SPECTRUM_ILLUMINANT);
+  *pdf = *pdf / impl->ns;
   return Ls;
 }
 
@@ -240,6 +345,7 @@ float MedianCutEnvironmentLight::Pdf(const Point &, const Vector &w) const {
 Spectrum MedianCutEnvironmentLight::Sample_L(const Scene *scene,
     const LightSample &ls, float u1, float u2, float time,
     Ray *ray, Normal *Ns, float *pdf) const {
+  fprintf(stderr, "Spectrum MedianCutEnvironmentLight::Sample_L complex\n");
   // Compute direction for environment light sample ray
 
   // Find $(u,v)$ sample coordinates in environment light texture
