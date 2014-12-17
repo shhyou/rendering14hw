@@ -49,8 +49,6 @@
 
 using std::vector;
 
-static int nLights = 1;
-
 // MedianCutEnvironmentLight private implementation
 struct MedCutEnvImpl {
   // MedianCutEnvironmentLight Private Data
@@ -147,7 +145,7 @@ fprintf(stderr, "    add [%d,%d]*[%d,%d], ", left, right, top, bottom);
 
 MedianCutEnvironmentLight::MedianCutEnvironmentLight(const Transform &light2world,
     const Spectrum &L, int ns_, const string &texmap)
-  : Light(light2world, ns_), impl(new MedCutEnvImpl {nullptr, nullptr, nLights}) {
+  : Light(light2world, ns_), impl(new MedCutEnvImpl {nullptr, nullptr, ns_}) {
   int width = 0, height = 0;
   RGBSpectrum *texels = NULL;
   // Read texel data from _texmap_ into _texels_
@@ -317,7 +315,6 @@ MedianCutEnvironmentLight *CreateMedianCutEnvironmentLight(const Transform &ligh
   Spectrum sc = paramSet.FindOneSpectrum("scale", Spectrum(1.0));
   string texmap = paramSet.FindOneFilename("mapname", "");
   int nSamples = paramSet.FindOneInt("nsamples", 1);
-  nLights = paramSet.FindOneInt("nlights", 4);
   if (PbrtOptions.quickRender) nSamples = max(1, nSamples / 4);
   return new MedianCutEnvironmentLight(light2world, L * sc, nSamples, texmap);
 }
