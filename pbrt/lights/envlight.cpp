@@ -45,7 +45,7 @@
 #include <limits>
 #include <functional>
 
-#define DEBUG 3
+#define DEBUG 0
 
 using std::vector;
 
@@ -110,9 +110,23 @@ fprintf(stderr, "    add [%d,%d]*[%d,%d], ", left, right, top, bottom);
 
     return;
   }
-  const auto sum = [&acc](const int l, const int t, const int r, const int b) -> float {
+  auto sum = [&acc](const int l, const int t, const int r, const int b) -> float {
     return acc[b+1][r+1] - acc[b+1][l] - acc[t][r+1] + acc[t][l];
   };
+
+#if DEBUG >= 3
+for (int y = 0; y < 5; ++y) {
+  for (int x = 0; x < 5; ++x) {
+    fprintf(stderr, "%.2f ", acc[y][x]);
+  }
+  fprintf(stderr, "\n");
+}
+fprintf(stderr, "sum = %f\n", sum(0, 0, 4, 4));
+fprintf(stderr, "sum = %f\n", sum(left, top, right, bottom));
+fprintf(stderr, "%d %d %d %d\n", left, top, right, bottom);
+fprintf(stderr, "sum = %f\n", sum(left, top, right/10, bottom/10));
+#endif
+
   if (left==right && top==bottom) {
 
 #if DEBUG >= 2
@@ -135,7 +149,7 @@ if (npow == 1) {
       const float diff = fabs(sum(left, top, x, bottom) - sum(x+1, top, right, bottom));
 #if DEBUG >= 3
 if (npow == 1) {
-  fprintf(stderr, "    x = %d, diff = %f, sum = %f, %f\n", x, diff,
+  fprintf(stderr, "    x = %d, diff = %f, sum = %f, %f", x, diff,
     sum(left, top, x, bottom), sum(x+1, top, right, bottom));
   getchar();
 }
@@ -216,6 +230,10 @@ fprintf(stderr, "rgb (%f,%f,%f)\n", rgb[0], rgb[1], rgb[2]);
 
   impl->solid_angle = ((2.f * M_PI) / (width - 1)) * (M_PI / (1.f * (height - 1)));
 
+#if DEBUG >= 1
+fprintf(stderr, "solid_angle = %f\n", impl->solid_angle);
+#endif
+
   for (int y = 0; y < height; ++y) {
     float sinTheta = sinf(M_PI * float(y + 0.5f)/height);
     for (int x = 0; x < width; ++x)
@@ -226,14 +244,46 @@ fprintf(stderr, "rgb (%f,%f,%f)\n", rgb[0], rgb[1], rgb[2]);
   // i.e. (0,*) and (*,0) are inserted 0-boundaries
   fprintf(stderr, "[+] [%10.2f] Initializing sum array\n", clock()*1.0/CLOCKS_PER_SEC);
 
+#if DEBUG >= 3
+for (int y = 0; y < 5; ++y) {
+  for (int x = 0; x < 5; ++x) {
+    fprintf(stderr, "%.2f ", texels[y*width+x].y());
+  }
+  fprintf(stderr, "\n");
+}
+fprintf(stderr, "\n");
+#endif
+
   vector<vector<float>> acc(height+1, vector<float>(width+1));
   for (int y = 0; y < height; ++y)
     for (int x = 0; x < width; ++x)
       acc[y+1][x+1] = acc[y+1][x] + texels[y*width + x].y();
-  for (int x = 1; x <= width; ++x)
-    for (int y = 1; y <= height; ++y)
-      acc[y][x] += acc[y][x-1];
 
+#if DEBUG >= 3
+for (int y = 0; y < 5; ++y) {
+  for (int x = 0; x < 5; ++x) {
+    fprintf(stderr, "%.2f ", acc[y][x]);
+  }
+  fprintf(stderr, "\n");
+}
+fprintf(stderr, "\n");
+#endif
+
+   for (int x = 1; x <= width; ++x)
+    for (int y = 1; y <= height; ++y)
+      acc[y][x] += acc[y-1][x];
+
+#if DEBUG >= 3
+for (int y = 0; y < 5; ++y) {
+  for (int x = 0; x < 5; ++x) {
+    fprintf(stderr, "%.2f ", acc[y][x]);
+  }
+  fprintf(stderr, "\n");
+}
+fprintf(stderr, "\n");
+#endif
+
+ 
   // initialize median cut
   printf("[+] [%10.2f] Calculating median cut\n", clock()*1.0/CLOCKS_PER_SEC);
   subdivide(this->impl, 1, texels, acc, 0, 0, width-1, height-1);
