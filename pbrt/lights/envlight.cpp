@@ -45,7 +45,7 @@
 #include <limits>
 #include <functional>
 
-#define DEBUG 0
+#define DEBUG 3
 
 using std::vector;
 
@@ -92,7 +92,7 @@ MedianCutEnvironmentLight::~MedianCutEnvironmentLight() {
 static void subdivide(MedCutEnvImpl *impl, int npow, RGBSpectrum texels[], const vector<vector<float>>& acc,
                int left, int top, int right, int bottom)
 {
-#if DEBUG
+#if DEBUG >= 2
 fprintf(stderr, "%3d: (%d,%d,%d,%d)\n", npow, left, top, right, bottom);
 #endif
 
@@ -102,7 +102,7 @@ fprintf(stderr, "%3d: (%d,%d,%d,%d)\n", npow, left, top, right, bottom);
       for (int x = left; x <= right; ++x)
         s += texels[y*impl->width + x];
 
-#if DEBUG
+#if DEBUG >= 1
 fprintf(stderr, "    add [%d,%d]*[%d,%d], ", left, right, top, bottom);
 #endif
 
@@ -114,18 +114,46 @@ fprintf(stderr, "    add [%d,%d]*[%d,%d], ", left, right, top, bottom);
     return acc[b+1][r+1] - acc[b+1][l] - acc[t][r+1] + acc[t][l];
   };
   if (left==right && top==bottom) {
+
+#if DEBUG >= 2
+fprintf(stderr, "    note: left = right = top = bottom = %d\n", left);
+#endif
+
     subdivide(impl, npow*2, texels, acc, left, top, right, bottom);
     subdivide(impl, npow*2, texels, acc, left, top, right, bottom);
   } else if (right-left >= bottom-top) {
+
+#if DEBUG >= 3
+if (npow == 1) {
+  fprintf(stderr, "    npow = %d, cutting vertically\n", npow);
+}
+#endif
+
     int best_x = left;
     float best_abs = std::numeric_limits<float>::max();
     for (int x = left; x < right; ++x) {
       const float diff = fabs(sum(left, top, x, bottom) - sum(x+1, top, right, bottom));
+#if DEBUG >= 3
+if (npow == 1) {
+  fprintf(stderr, "    x = %d, diff = %f, sum = %f, %f\n", x, diff,
+    sum(left, top, x, bottom), sum(x+1, top, right, bottom));
+  getchar();
+}
+#endif
       if (diff < best_abs) {
         best_abs = diff;
         best_x = x;
       }
     }
+
+#if DEBUG >= 3
+if (npow == 1) {
+  fprintf(stderr, "    best x = %d\n", best_x);
+  fprintf(stderr, "    (%d,%d,%d,%d)\n", left, top, best_x, bottom);
+  fprintf(stderr, "    (%d,%d,%d,%d)\n", best_x+1, top, right, bottom);
+}
+#endif
+
     subdivide(impl, npow*2, texels, acc, left, top, best_x, bottom);
     subdivide(impl, npow*2, texels, acc, best_x+1, top, right, bottom);
   } else {
@@ -179,7 +207,7 @@ MedianCutEnvironmentLight::MedianCutEnvironmentLight(const Transform &light2worl
     const Point wi(-sintheta*cosphi, -sintheta*sinphi, -costheta);
     p.AddPoint(string("to"), &wi, 1);
 
-#if DEBUG
+#if DEBUG >= 1
 fprintf(stderr, "rgb (%f,%f,%f)\n", rgb[0], rgb[1], rgb[2]);
 #endif
 
@@ -198,7 +226,7 @@ fprintf(stderr, "rgb (%f,%f,%f)\n", rgb[0], rgb[1], rgb[2]);
   // i.e. (0,*) and (*,0) are inserted 0-boundaries
   fprintf(stderr, "[+] [%10.2f] Initializing sum array\n", clock()*1.0/CLOCKS_PER_SEC);
 
-  vector<vector<float>> acc(height+1, vector<float>(width+1, 0.f));
+  vector<vector<float>> acc(height+1, vector<float>(width+1));
   for (int y = 0; y < height; ++y)
     for (int x = 0; x < width; ++x)
       acc[y+1][x+1] = acc[y+1][x] + texels[y*width + x].y();
@@ -207,9 +235,9 @@ fprintf(stderr, "rgb (%f,%f,%f)\n", rgb[0], rgb[1], rgb[2]);
       acc[y][x] += acc[y][x-1];
 
   // initialize median cut
-  fprintf(stderr, "[+] [%10.2f] Calculating median cut\n", clock()*1.0/CLOCKS_PER_SEC);
+  printf("[+] [%10.2f] Calculating median cut\n", clock()*1.0/CLOCKS_PER_SEC);
   subdivide(this->impl, 1, texels, acc, 0, 0, width-1, height-1);
-  fprintf(stderr, "[+] [%10.2f] Done %d\n", clock()*1.0/CLOCKS_PER_SEC, static_cast<int>(impl->ls.size()));
+  printf("[+] [%10.2f] Done with %d lights\n", clock()*1.0/CLOCKS_PER_SEC, static_cast<int>(impl->ls.size()));
 
   delete[] texels;
 
@@ -327,8 +355,10 @@ Spectrum MedianCutEnvironmentLight::Sample_L(const Point &p, float pEpsilon,
   Spectrum Ls(dl->Sample_L(p, pEpsilon, ls, time, wi, pdf, visibility), SPECTRUM_ILLUMINANT);
   *pdf = *pdf / impl->ns;
 
-#if DEBUG
-fprintf(stderr, "Sample %f, (%f,%f,%f)\n", *pdf, (*wi)[0], (*wi)[1], (*wi)[2]);
+#if DEBUG >= 3
+float rgb[3];
+Ls.ToRGB(rgb);
+fprintf(stderr, "Sample %f, (%f,%f,%f) with rgb (%f,%f,%f)\n", *pdf, (*wi)[0], (*wi)[1], (*wi)[2], rgb[0], rgb[1], rgb[2]);
 getchar();
 #endif
 
