@@ -30,6 +30,7 @@
  */
 
 #include <vector>
+#include <iterator>
 
 // renderers/reconrenderer.cpp*
 #include "stdafx.h"
@@ -45,6 +46,8 @@
 #include "intersection.h"
 
 using std::vector;
+using std::back_insert_iterator;
+using std::back_inserter;
 
 struct ReconSample_t {
   Sample sampl;
@@ -54,7 +57,7 @@ struct ReconSample_t {
 
 struct ReconRenderer_Impl {
   Sampler *sampler;
-  vector<vector<ReconSample_t>> sampls;
+  vector<ReconSample_t> sampls;
 };
 
 // ReconRendererInit Declarations
@@ -64,8 +67,8 @@ public:
   ReconRendererInit(const Scene *sc, Renderer *ren, Camera *c,
                     ProgressReporter &pr, Sampler *ms, Sample *sam,
                     int nsamp_, int tn, int tc,
-                    vector<ReconSample_t>& sampl_)
-    : reporter(pr), sampl(sampl_)
+                    back_insert_iterator<vector<ReconSample_t>>& samplit_)
+    : reporter(pr), samplit(samplit_)
   {
     scene = sc; renderer = ren; camera = c; mainSampler = ms;
     origSample = sam; nsamp = nsamp_; taskNum = tn; taskCount = tc;
@@ -75,7 +78,7 @@ public:
 private:
   // ReconRendererInit Private Data
   ProgressReporter &reporter;
-  vector<ReconSample_t>& sampl;
+  back_insert_iterator<vector<ReconSample_t>>& samplit;
   const Scene *scene;
   const Renderer *renderer;
   Camera *camera;
@@ -83,8 +86,6 @@ private:
   Sample *origSample;
   int nsamp;
   int taskNum, taskCount;
-
-  struct ReconRendererTask_Impl *impl;
 };
 
 // ReconRendererInit Definitions
@@ -139,7 +140,7 @@ void ReconRendererInit::Run() {
       }
       PBRT_FINISHED_CAMERA_RAY_INTEGRATION(&rays[i], &samples[i], &Ls_a[i]);
 
-      sampl.push_back({samples[i], Ls_a[i], Ts_a[i], isects_a[i]});
+      *samplit++ = {samples[i], Ls_a[i], Ts_a[i], isects_a[i]};
     }
 
 #if 0
@@ -169,6 +170,114 @@ void ReconRendererInit::Run() {
   reporter.Update();
   PBRT_FINISHED_RENDERTASK(taskNum);
 }
+
+
+
+
+// ReconRendererTask Declarations
+class ReconRendererTask : public Task {
+public:
+  // ReconRendererTask Public Methods
+  ReconRendererTask(const Scene *sc, Renderer *ren, Camera *c,
+                    ProgressReporter &pr, Sampler *ms, Sample *sam,
+                    int nsamp_, int tn, int tc,
+                    const vector<ReconSample_t>& sampls_)
+    : reporter(pr), sampls(sampls_)
+  {
+    scene = sc; renderer = ren; camera = c; mainSampler = ms;
+    origSample = sam; nsamp = nsamp_; taskNum = tn; taskCount = tc;
+  }
+  ~ReconRendererTask() = default;
+  void Run();
+private:
+  // ReconRendererTask Private Data
+  ProgressReporter &reporter;
+  const vector<ReconSample_t>& sampls;
+  const Scene *scene;
+  const Renderer *renderer;
+  Camera *camera;
+  Sampler *mainSampler;
+  Sample *origSample;
+  int nsamp;
+  int taskNum, taskCount;
+};
+
+// ReconRendererTask Definitions
+void ReconRendererTask::Run() {
+  PBRT_STARTED_RENDERTASK(taskNum);
+  // Get sub-_Sampler_ for _ReconRendererTask_
+  Sampler *sampler = mainSampler->GetSubSampler(taskNum, taskCount);
+  if (!sampler) {
+    reporter.Update();
+    PBRT_FINISHED_RENDERTASK(taskNum);
+    return;
+  }
+
+  // Declare local variables used for rendering loop
+  RNG rng(taskNum);
+
+  // Allocate space for samples and intersections
+  const int& maxSamples = sampler->MaximumSampleCount();
+  Sample *samples = origSample->Duplicate(maxSamples);
+  RayDifferential *rays = new RayDifferential[maxSamples];
+  Spectrum *Ls_a = new Spectrum[maxSamples];
+  Spectrum *Ts_a = new Spectrum[maxSamples];
+  Intersection *isects_a = new Intersection[maxSamples];
+
+  // Get samples from _Sampler_ and update image
+  int sampleCount;
+  while ((sampleCount = sampler->GetMoreSamples(samples, rng)) > 0) {
+    // Generate camera rays and compute radiance along rays
+    for (int i = 0; i < sampleCount; ++i) {
+      // Find camera ray for _sample[i]_
+      PBRT_STARTED_GENERATING_CAMERA_RAY(&samples[i]);
+      float rayWeight = camera->GenerateRayDifferential(samples[i], &rays[i]);
+      rays[i].ScaleDifferentials(1.f / sqrtf(sampler->samplesPerPixel));
+      PBRT_FINISHED_GENERATING_CAMERA_RAY(&samples[i], &rays[i], rayWeight);
+
+      // Evaluate radiance along camera ray
+      PBRT_STARTED_CAMERA_RAY_INTEGRATION(&rays[i], &samples[i]);
+      if (rayWeight > 0.f) {
+//        Ls_a[i] = rayWeight * renderer->Li(scene, rays[i], &samples[i], rng,
+//                                         arena, &isects_a[i], &Ts_a[i]);
+        Ls_a[i] = -1.f; // XXX TODO FIXME
+      } else {
+        Ls_a[i] = 0.f;
+        Ts_a[i] = 1.f;
+      }
+
+      // Issue warning if unexpected radiance value returned
+      if (Ls_a[i].HasNaNs() || Ls_a[i].y() < -1e-5 || std::isinf(Ls_a[i].y())) {
+        Error("NaN/negative/infinite recons radiance value' returned "
+              "for image sample.  Setting to black.");
+        Ls_a[i] = Spectrum(0.f);
+      }
+      PBRT_FINISHED_CAMERA_RAY_INTEGRATION(&rays[i], &samples[i], &Ls_a[i]);
+    }
+
+    // Report sample results to _Sampler_, add contributions to image
+    if (sampler->ReportResults(samples, rays, Ls_a, isects_a, sampleCount)) {
+      for (int i = 0; i < sampleCount; ++i) {
+        PBRT_STARTED_ADDING_IMAGE_SAMPLE(&samples[i], &rays[i], &Ls_a[i], &Ts_a[i]);
+        camera->film->AddSample(samples[i], Ls_a[i]);
+        PBRT_FINISHED_ADDING_IMAGE_SAMPLE();
+      }
+    }
+  }
+
+  // Clean up after _ReconRendererTask_ is done with its image region
+  camera->film->UpdateDisplay(sampler->xPixelStart,
+                              sampler->yPixelStart, sampler->xPixelEnd+1, sampler->yPixelEnd+1);
+  delete sampler;
+  delete[] samples;
+  delete[] rays;
+  delete[] Ls_a;
+  delete[] Ts_a;
+  delete[] isects_a;
+  reporter.Update();
+  PBRT_FINISHED_RENDERTASK(taskNum);
+}
+
 
 
 
@@ -212,21 +321,44 @@ void ReconRenderer::Render(const Scene *scene) {
 
   // Create and launch _ReconRendererTask_s for rendering image
 
-  // No parallelization exists; we do the whole-image processing
-  const int nTasks = RoundUpPow2(1);
-  ProgressReporter reporter(nTasks*2, "Rendering");
+  ProgressReporter reporter(1*2, "Rendering"); // XXX TODO FIXME
+  back_insert_iterator<vector<ReconSample_t>> samplit = back_inserter(impl->sampls);
   {
+    // No parallelization exists; we do the whole-image processing
+    const int nTasks = RoundUpPow2(1);
+
     // Allocate and initialize _sample_
     Sample *sample = new Sample(impl->sampler, surfaceIntegrator,
                                 volumeIntegrator, scene);
     vector<Task *> renderTasks;
-    impl->sampls.resize(nTasks);
     for (int i = 0; i < nTasks; ++i) {
       renderTasks.push_back(new ReconRendererInit(scene, this, camera,
-                                                  reporter, impl->sampler, sample, 
+                                                  reporter, impl->sampler, sample,
                                                   nsamp,
                                                   nTasks-1-i, nTasks,
-                                                  impl->sampls[i]));
+                                                  samplit));
+    }
+    EnqueueTasks(renderTasks);
+    WaitForAllTasks();
+    for (uint32_t i = 0; i < renderTasks.size(); ++i)
+      delete renderTasks[i];
+    delete sample;
+  }
+  {
+    // Compute number of _SamplerRendererTask_s to create for rendering
+    const int nPixels = camera->film->xResolution * camera->film->yResolution;
+    const int nTasks = RoundUpPow2(max(32 * NumSystemCores(), nPixels / (16*16)));
+
+    // Allocate and initialize _sample_
+    Sample *sample = new Sample(sampler, surfaceIntegrator,
+                                volumeIntegrator, scene);
+    vector<Task *> renderTasks;
+    for (int i = 0; i < nTasks; ++i) {
+      renderTasks.push_back(new ReconRendererTask(scene, this, camera,
+                                                  reporter, sampler, sample, 
+                                                  nsamp,
+                                                  nTasks-1-i, nTasks,
+                                                  impl->sampls));
     }
     EnqueueTasks(renderTasks);
     WaitForAllTasks();
