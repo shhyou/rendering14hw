@@ -94,6 +94,7 @@
 #include "renderers/createprobes.h"
 #include "renderers/metropolis.h"
 #include "renderers/samplerrenderer.h"
+#include "renderers/reconrenderer.h"
 #include "renderers/surfacepoints.h"
 #include "samplers/adaptive.h"
 #include "samplers/bestcandidate.h"
@@ -1254,7 +1255,7 @@ Renderer *RenderOptions::MakeRenderer() const {
         RendererParams.ReportUnused();
     }
     else {
-        if (RendererName != "sampler")
+        if (RendererName != "sampler" && RendererName != "reconstructed")
             Warning("Renderer type \"%s\" unknown.  Using \"sampler\".",
                     RendererName.c_str());
         bool visIds = RendererParams.FindOneBool("visualizeobjectids", false);
@@ -1268,8 +1269,13 @@ Renderer *RenderOptions::MakeRenderer() const {
         VolumeIntegrator *volumeIntegrator = MakeVolumeIntegrator(VolIntegratorName,
             VolIntegratorParams);
         if (!volumeIntegrator) Severe("Unable to create volume integrator.");
-        renderer = new SamplerRenderer(sampler, camera, surfaceIntegrator,
+        if (RendererName == "reconstructed") {
+          renderer = new ReconRenderer(sampler, camera, surfaceIntegrator,
                                        volumeIntegrator, visIds);
+        } else {
+          renderer = new SamplerRenderer(sampler, camera, surfaceIntegrator,
+                                         volumeIntegrator, visIds);
+        }
         // Warn if no light sources are defined
         if (lights.size() == 0)
             Warning("No light sources defined in scene; "
