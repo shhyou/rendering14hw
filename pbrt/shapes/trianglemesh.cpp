@@ -412,7 +412,7 @@ TriangleMesh *CreateTriangleMeshShape(const Transform *o2w, const Transform *w2o
                 uvs[2*vp[1]+1] == uvs[2*vp[2]+1]) ||
                 (uvs[2*vp[2]] == uvs[2*vp[0]] &&
                 uvs[2*vp[2]+1] == uvs[2*vp[0]+1])) {
-                Warning("Degenerate uv coordinates in triangle mesh.  Discarding all uvs.");
+                //Warning("Degenerate uv coordinates in triangle mesh.  Discarding all uvs.");
                 uvs = NULL;
                 break;
             }

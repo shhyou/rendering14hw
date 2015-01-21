@@ -102,11 +102,28 @@ fprintf(stderr, "%3d: (%d,%d,%d,%d)\n", npow, left, top, right, bottom);
       for (int x = left; x <= right; ++x)
         s += texels[y*impl->width + x];
 
+    float total = 0.0;
+    for (int y = top; y <= bottom; ++y)
+      for (int x = left; x <= right; ++x)
+        total += texels[y*impl->width + x].y();
+
+    float sumy = 0.0;
+    for (int y = top; y <= bottom; ++y)
+      for (int x = left; x <= right; ++x)
+        sumy += y * texels[y*impl->width + x].y();
+
+    float sumx = 0.0;
+    for (int y = top; y <= bottom; ++y)
+      for (int x = left; x <= right; ++x)
+        sumx += x * texels[y*impl->width + x].y();
+
+    total = 1.0f/total;
+
 #if DEBUG >= 1
 fprintf(stderr, "    add [%d,%d]*[%d,%d], ", left, right, top, bottom);
 #endif
 
-    impl->ls.push_back(impl->createDistantLight(s, 0.5f*(top+bottom), 0.5f*(left+right)));
+    impl->ls.push_back(impl->createDistantLight(s, sumy*total, sumx*total));
 
     return;
   }
