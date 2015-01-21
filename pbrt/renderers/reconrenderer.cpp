@@ -48,19 +48,6 @@ struct ReconRenderer_Impl {
 struct ReconRendererTask_Impl {
 };
 
-static uint32_t hash(char *key, uint32_t len) {
-  uint32_t hash = 0, i;
-  for (hash=0, i=0; i<len; ++i) {
-    hash += key[i];
-    hash += (hash << 10);
-    hash ^= (hash >> 6);
-  }
-  hash += (hash << 3);
-  hash ^= (hash >> 11);
-  hash += (hash << 15);
-  return hash;
-} 
-
 // ReconRendererTask Definitions
 void ReconRendererTask::Run() {
   PBRT_STARTED_RENDERTASK(taskNum);
@@ -97,41 +84,19 @@ void ReconRendererTask::Run() {
 
       // Evaluate radiance along camera ray
       PBRT_STARTED_CAMERA_RAY_INTEGRATION(&rays[i], &samples[i]);
-      if (visualizeObjectIds) {
-        if (rayWeight > 0.f && scene->Intersect(rays[i], &isects[i])) {
-          // random shading based on shape id...
-          uint32_t ids[2] = { isects[i].shapeId, isects[i].primitiveId };
-          uint32_t h = hash((char *)ids, sizeof(ids));
-          float rgb[3] = { float(h & 0xff), float((h >> 8) & 0xff),
-                   float((h >> 16) & 0xff) };
-          Ls[i] = Spectrum::FromRGB(rgb);
-          Ls[i] /= 255.f;
-        }
-        else
-          Ls[i] = 0.f;
+      if (rayWeight > 0.f) {
+        Ls[i] = rayWeight * renderer->Li(scene, rays[i], &samples[i], rng,
+                                         arena, &isects[i], &Ts[i]);
       } else {
-        if (rayWeight > 0.f) {
-          Ls[i] = rayWeight * renderer->Li(scene, rays[i], &samples[i], rng,
-                                           arena, &isects[i], &Ts[i]);
-        } else {
-          Ls[i] = 0.f;
-          Ts[i] = 1.f;
-        }
+        Ls[i] = 0.f;
+        Ts[i] = 1.f;
+      }
 
-        // Issue warning if unexpected radiance value returned
-        if (Ls[i].HasNaNs()) {
-          Error("Not-a-number radiance value returned "
-                "for image sample.  Setting to black.");
-          Ls[i] = Spectrum(0.f);
-        } else if (Ls[i].y() < -1e-5) {
-          Error("Negative luminance value, %f, returned "
-                "for image sample.  Setting to black.", Ls[i].y());
-          Ls[i] = Spectrum(0.f);
-        } else if (std::isinf(Ls[i].y())) {
-          Error("Infinite luminance value returned "
-                "for image sample.  Setting to black.");
-          Ls[i] = Spectrum(0.f);
-        }
+      // Issue warning if unexpected radiance value returned
+      if (Ls[i].HasNaNs() || Ls[i].y() < -1e-5 || std::isinf(Ls[i].y())) {
+        Error("NaN/negative/infinite radiance value returned "
+              "for image sample.  Setting to black.");
+        Ls[i] = Spectrum(0.f);
       }
       PBRT_FINISHED_CAMERA_RAY_INTEGRATION(&rays[i], &samples[i], &Ls[i]);
     }
@@ -199,10 +164,8 @@ void ReconRenderer::Render(const Scene *scene) {
 
   // Create and launch _ReconRendererTask_s for rendering image
 
-  // Compute number of _ReconRendererTask_s to create for rendering
-  int nPixels = camera->film->xResolution * camera->film->yResolution;
-  int nTasks = max(32 * NumSystemCores(), nPixels / (16*16));
-  nTasks = RoundUpPow2(nTasks);
+  // No parallelization exists; we do the whole-image processing
+  const int nTasks = RoundUpPow2(1);
   ProgressReporter reporter(nTasks, "Rendering");
   vector<Task *> renderTasks;
   for (int i = 0; i < nTasks; ++i) {
