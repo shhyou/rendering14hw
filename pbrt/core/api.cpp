@@ -1259,6 +1259,7 @@ Renderer *RenderOptions::MakeRenderer() const {
             Warning("Renderer type \"%s\" unknown.  Using \"sampler\".",
                     RendererName.c_str());
         bool visIds = RendererParams.FindOneBool("visualizeobjectids", false);
+        int nsamp = RendererParams.FindOneInt("pixelsamples", 4);
         RendererParams.ReportUnused();
         Sampler *sampler = MakeSampler(SamplerName, SamplerParams, camera->film, camera);
         if (!sampler) Severe("Unable to create sampler.");
@@ -1271,7 +1272,7 @@ Renderer *RenderOptions::MakeRenderer() const {
         if (!volumeIntegrator) Severe("Unable to create volume integrator.");
         if (RendererName == "reconstructed") {
           renderer = new ReconRenderer(sampler, camera, surfaceIntegrator,
-                                       volumeIntegrator, visIds);
+                                       volumeIntegrator, nsamp);
         } else {
           renderer = new SamplerRenderer(sampler, camera, surfaceIntegrator,
                                          volumeIntegrator, visIds);

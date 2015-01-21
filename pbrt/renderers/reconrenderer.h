@@ -48,7 +48,7 @@ class ReconRenderer : public Renderer {
 public:
   // ReconRenderer Public Methods
   ReconRenderer(Sampler *s, Camera *c, SurfaceIntegrator *si,
-                VolumeIntegrator *vi, bool visIds);
+                VolumeIntegrator *vi, int nsamp_);
   ~ReconRenderer();
   void Render(const Scene *scene);
   Spectrum Li(const Scene *scene, const RayDifferential &ray,
@@ -58,7 +58,7 @@ public:
                          const Sample *sample, RNG &rng, MemoryArena &arena) const;
 private:
   // ReconRenderer Private Data
-  bool visualizeObjectIds;
+  int nsamp;
   Sampler *sampler;
   Camera *camera;
   SurfaceIntegrator *surfaceIntegrator;
@@ -66,36 +66,5 @@ private:
 
   struct ReconRenderer_Impl *impl;
 };
-
-
-
-// ReconRendererTask Declarations
-class ReconRendererTask : public Task {
-public:
-  // ReconRendererTask Public Methods
-  ReconRendererTask(const Scene *sc, Renderer *ren, Camera *c,
-            ProgressReporter &pr, Sampler *ms, Sample *sam, 
-            bool visIds, int tn, int tc)
-    : reporter(pr)
-  {
-    scene = sc; renderer = ren; camera = c; mainSampler = ms;
-    origSample = sam; visualizeObjectIds = visIds; taskNum = tn; taskCount = tc;
-  }
-  void Run();
-private:
-  // ReconRendererTask Private Data
-  const Scene *scene;
-  const Renderer *renderer;
-  Camera *camera;
-  Sampler *mainSampler;
-  ProgressReporter &reporter;
-  Sample *origSample;
-  bool visualizeObjectIds;
-  int taskNum, taskCount;
-
-  struct ReconRendererTask_Impl *impl;
-};
-
-
 
 #endif // PBRT_RENDERERS_RECONRENDERER_H
