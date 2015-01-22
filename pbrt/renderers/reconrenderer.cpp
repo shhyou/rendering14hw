@@ -55,6 +55,18 @@ struct ReconSample_t {
   CameraSample sampl;
   Spectrum L, T;
   Intersection isect;
+/*
+  float reproj_x(float u, float v) const {
+    const float dxdu = isect.dg.dudx? 1.f/isect.dg.dudx : 0.f;
+    const float dxdv = isect.dg.dvdx? 1.f/isect.dg.dvdx : 0.f;
+    return sampl.imageX + (u - sampl.lensU)*dxdu + (v - sampl.lensV)*dxdv;
+  }
+  float reproj_y(float u, float v) const {
+    const float dydu = isect.dg.dudy? 1.f/isect.dg.dudy : 0.f;
+    const float dydv = isect.dg.dvdy? 1.f/isect.dg.dvdy : 0.f;
+    return sampl.imageY + (u - sampl.lensU)*dydu + (v - sampl.lensV)*dydv;
+  }
+*/
   float reproj_x(float u) const {
     return isect.dg.dudx?
             (sampl.imageX + (u - sampl.lensU)/isect.dg.dudx)
@@ -74,7 +86,7 @@ struct search_t {
   const float dist2;
   vector<vector<vector<ReconSample_t*>>> sampls;
   search_t(vector<ReconSample_t>& sampls_, int nsamp)
-    : dist2(2.f/nsamp*2.f/nsamp)
+    : dist2(4.f/nsamp)
   {
     max_x = 0, max_y = 0;
     for (ReconSample_t& sampl : sampls_) {
@@ -295,12 +307,19 @@ bool ReconRendererTask::SameSurface(
     s2.reproj_y(v + delta),
     s2.reproj_y(v - delta),
   };
-  const unsigned int res =
+  const unsigned int xres =
        (x1[0]-x2[0] > 0)
-    | ((x1[1]-x2[1] > 0) << 1)
-    | ((y1[0]-y2[0] > 0) << 2)
-    | ((y1[1]-y2[1] > 0) << 3);
-  return res==0 || res==0xf;
+    | ((x1[1]-x2[1] > 0) << 1);
+  const unsigned int yres =
+       (y1[0]-y2[0] > 0)
+    | ((y1[1]-y2[1] > 0) << 1);
+  static const bool consistent[4] = {
+    true,    //  >    >
+    false,   //  >   <=
+    true,    // <=    >
+    false    // <=   <=
+  };
+  return consistent[xres] && consistent[yres];
 }
 
 static inline float Cross(float x0, float y0, float x1, float y1) {
