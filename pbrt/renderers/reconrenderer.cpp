@@ -55,14 +55,13 @@ using std::back_inserter;
 
 struct ReconSample_t {
   float distz, depth;
-  CameraSample sampl;
-  Spectrum L, T;
-  Intersection isect;
+  float imageX, imageY, lensU, lensV;
+  Spectrum L;
   float reproj_x(float u) const {
-    return sampl.imageX + (u - sampl.lensU)*depth;
+    return imageX + (u - lensU)*depth;
   }
   float reproj_y(float v) const {
-    return sampl.imageY + (v - sampl.lensV)*depth;
+    return imageY + (v - lensV)*depth;
   }
 };
 
@@ -73,19 +72,19 @@ struct search_t {
   const float dist2;
   vector<vector<vector<ReconSample_t*>>> sampls;
   search_t(vector<ReconSample_t>& sampls_, int nsamp)
-    : dist2(8.f/nsamp)
+    : dist2(4.f/nsamp)
   {
     max_x = 0, max_y = 0;
     for (ReconSample_t& sampl : sampls_) {
-      max_x = std::max(max_x, static_cast<int>(sampl.sampl.imageX));
-      max_y = std::max(max_y, static_cast<int>(sampl.sampl.imageY));
+      max_x = std::max(max_x, static_cast<int>(sampl.imageX));
+      max_y = std::max(max_y, static_cast<int>(sampl.imageY));
     }
     ++max_y;
     ++max_x;
     sampls.resize(max_y, vector<vector<ReconSample_t*>>(max_x));
     for (ReconSample_t& sampl : sampls_) {
-      int y {static_cast<int>(sampl.sampl.imageY)}
-        , x {static_cast<int>(sampl.sampl.imageX)};
+      int y {static_cast<int>(sampl.imageY)}
+        , x {static_cast<int>(sampl.imageX)};
       sampls[y][x].push_back(&sampl);
     }
   }
@@ -105,10 +104,10 @@ printf("search (%f,%f) (%f,%f)\n", x, y, u, v);
             if (distx*distx + disty*disty <= dist2) {
 #if PAUSE_LOOKUP
 printf("    (%f,%f) (%f,%f)\n",
-  psampl->sampl.imageX, psampl->sampl.imageY,
-  psampl->sampl.lensU, psampl->sampl.lensV);
-printf("    reproj (%f,%f) z=%f (%f)\n",
-  psampl->reproj_x(u), psampl->reproj_y(v), psampl->distz, psampl->isect.dg.p.z);
+  psampl->imageX, psampl->imageY,
+  psampl->lensU, psampl->lensV);
+printf("    reproj (%f,%f) z=%f\n",
+  psampl->reproj_x(u), psampl->reproj_y(v), psampl->distz);
 #endif
               res.push_back(*psampl);
             }
@@ -217,7 +216,8 @@ void ReconRendererInit::Run() {
       PBRT_FINISHED_CAMERA_RAY_INTEGRATION(&rays[i], &samples[i], &Ls_a[i]);
 
       const Point p {(*WorldToCamera)(isects_a[i].dg.p)};
-      *samplit++ = {p.z, 1.f/p.z, samples[i], Ls_a[i], Ts_a[i], isects_a[i]};
+      *samplit++ = {p.z, 1.f/p.z, samples[i].imageX, samples[i].imageY,
+                    samples[i].lensU, samples[i].lensV, Ls_a[i]};
     }
 
 #if SHOW_SAMPLE
@@ -402,7 +402,7 @@ printf("\n(%f,%f) (%f,%f): %u surfaces\n",
           const vector<ReconSample_t>& S = *it;
 #if 0
 for (const ReconSample_t& s : S) {
-  printf("    sample (%f,%f) (%f,%f)\n", s.sampl.imageX, s.sampl.imageY, s.sampl.lensU, s.sampl.lensV);
+  printf("    sample (%f,%f) (%f,%f)\n", s.imageX, s.imageY, s.lensU, s.lensV);
 }
 printf("\n");
 #endif
@@ -432,10 +432,9 @@ printf("\n");
 //getchar();
         const vector<ReconSample_t>& S = it!=end(surfaces)? *it : surfaces.front();
         Ls_a[i] = 0.f; // XXX TODO FIXME: add filter
-        Ts_a[i] = 0.f; // is this really needed?
+        Ts_a[i] = 0.f;
         for (const ReconSample_t& s : S) {
           Ls_a[i] += s.L;
-          Ts_a[i] += s.T;
         }
         Ls_a[i] *= rayWeight;
       } else {
