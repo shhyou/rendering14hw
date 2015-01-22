@@ -347,8 +347,10 @@ bool ReconRendererTask::SameSurface(
     | ((y1[2]-y2[2] > 0) << 2)
     | ((y1[3]-y2[3] > 0) << 3);
   static const bool consistent[16] = {
-    [0x0] = true,   // <=   <=   <=  <=
-    [0xf] = true    //  >    >    >   >
+    true,   // <=   <=   <=  <=
+    false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false,
+    true    //  >    >    >   >
   };
   return consistent[xres] && consistent[yres];
 }
