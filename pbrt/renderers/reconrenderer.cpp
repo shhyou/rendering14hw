@@ -31,6 +31,7 @@
 
 #define SHOW_SAMPLE 0
 #define PAUSE_LOOKUP 0 // 1 for display, 2 for pause
+#define RECON_FILTER 1
 
 #include <vector>
 #include <iterator>
@@ -40,6 +41,7 @@
 #include "stdafx.h"
 #include "renderers/reconrenderer.h"
 #include "samplers/lowdiscrepancy.h"
+#include "filters/gaussian.h"
 #include "scene.h"
 #include "film.h"
 #include "volume.h"
@@ -370,6 +372,8 @@ void ReconRendererTask::Run() {
   Spectrum *Ts_a = new Spectrum[maxSamples];
   Intersection *isects_a = new Intersection[maxSamples];
 
+  const GaussianFilter filt(2.f/sqrt(nsamp), 2.f/sqrt(nsamp), 100.f);
+
   // Get samples from _Sampler_ and update image
   int sampleCount;
   while ((sampleCount = sampler->GetMoreSamples(samples, rng)) > 0) {
@@ -434,7 +438,12 @@ printf("\n");
         Ls_a[i] = 0.f; // XXX TODO FIXME: add filter
         Ts_a[i] = 0.f;
         for (const ReconSample_t& s : S) {
+#if RECON_FILTER
+          Ls_a[i] += s.L * filt.Evaluate(s.reproj_x(samples[i].lensU) - samples[i].imageX,
+                                         s.reproj_y(samples[i].lensV) - samples[i].imageY);
+#else
           Ls_a[i] += s.L;
+#endif
         }
         Ls_a[i] *= rayWeight;
       } else {
