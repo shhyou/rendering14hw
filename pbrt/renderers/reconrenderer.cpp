@@ -333,6 +333,9 @@ void ReconRendererTask::ConstructSurfaces(float x, float y, float u, float v,
   searcher.lookup(x, y, u, v, N); /* output is sorted */
   vector<vector<ReconSample_t>>().swap(surfaces);
 
+  if (N.empty())
+    return;
+
   auto it = begin(N);
   do {
     surfaces.push_back({});
@@ -385,9 +388,23 @@ void ReconRendererTask::Run() {
                                 samples[i].lensU,  samples[i].lensV,
                                 surfaces);
         auto it = begin(surfaces);
+#if 0
+printf("\n(%f,%f) (%f,%f): %u surfaces\n",
+  samples[i].imageX, samples[i].imageY,
+  samples[i].lensU, samples[i].lensV,
+  surfaces.size());
+#endif
+        if (surfaces.empty())
+          continue;
+        bool found = false;
         for (; it != end(surfaces); ++it) {
           const vector<ReconSample_t>& S = *it;
-          bool found = false;
+#if 0
+for (const ReconSample_t& s : S) {
+  printf("    sample (%f,%f) (%f,%f)\n", s.sampl.imageX, s.sampl.imageY, s.sampl.lensU, s.sampl.lensV);
+}
+printf("\n");
+#endif
           for (size_t a = 2; !found && a < S.size(); ++a) {
             const float x0 = S[a].reproj_x(samples[i].lensU)
                       , y0 = S[a].reproj_y(samples[i].lensV);
@@ -411,10 +428,13 @@ void ReconRendererTask::Run() {
           }
           if (found) break;
         }
+//getchar();
         const vector<ReconSample_t>& S = it!=end(surfaces)? *it : surfaces.front();
-        Ls_a[i] = 0.f; // XXX TODO FIXME
+        Ls_a[i] = 0.f; // XXX TODO FIXME: add filter
+        Ts_a[i] = 0.f; // is this really needed?
         for (const ReconSample_t& s : S) {
           Ls_a[i] += s.L;
+          Ts_a[i] += s.T;
         }
         Ls_a[i] *= rayWeight;
       } else {
