@@ -138,7 +138,7 @@ printf("    reproj (%f,%f) z=%f (%f)\n",
     }
 #if PAUSE_LOOKUP > 1
 getchar();
-#else
+#elif PAUSE_LOOKUP
 putchar('\n');
 #endif
     std::sort(res.begin(), res.end(), [](const ReconSample_t& r1, const ReconSample_t& r2) {
