@@ -48,7 +48,7 @@ class ReconRenderer : public Renderer {
 public:
   // ReconRenderer Public Methods
   ReconRenderer(Sampler *s, Camera *c, SurfaceIntegrator *si,
-                VolumeIntegrator *vi, int nsamp_);
+                VolumeIntegrator *vi, int nsamp_, Transform* WorldToCamera_);
   ~ReconRenderer();
   void Render(const Scene *scene);
   Spectrum Li(const Scene *scene, const RayDifferential &ray,

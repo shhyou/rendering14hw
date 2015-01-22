@@ -190,6 +190,7 @@ struct RenderOptions {
     string CameraName;
     ParamSet CameraParams;
     TransformSet CameraToWorld;
+    TransformSet WorldToCamera;
     vector<Light *> lights;
     vector<Reference<Primitive> > primitives;
     mutable vector<VolumeRegion *> volumeRegions;
@@ -859,6 +860,7 @@ void pbrtCamera(const string &name, const ParamSet &params) {
     renderOptions->CameraName = name;
     renderOptions->CameraParams = params;
     renderOptions->CameraToWorld = Inverse(curTransform);
+    renderOptions->WorldToCamera = curTransform;
     namedCoordinateSystems["camera"] = renderOptions->CameraToWorld;
 }
 
@@ -1271,8 +1273,10 @@ Renderer *RenderOptions::MakeRenderer() const {
             VolIntegratorParams);
         if (!volumeIntegrator) Severe("Unable to create volume integrator.");
         if (RendererName == "reconstructed") {
+          Transform *pWorld2Camera;
+          transformCache.Lookup(WorldToCamera[0], &pWorld2Camera, NULL);
           renderer = new ReconRenderer(sampler, camera, surfaceIntegrator,
-                                       volumeIntegrator, nsamp);
+                                       volumeIntegrator, nsamp, pWorld2Camera);
         } else {
           renderer = new SamplerRenderer(sampler, camera, surfaceIntegrator,
                                          volumeIntegrator, visIds);
