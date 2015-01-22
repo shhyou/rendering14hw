@@ -31,7 +31,6 @@
 
 #define SHOW_SAMPLE 0
 #define PAUSE_LOOKUP 0 // 1 for display, 2 for pause
-#define REPROJ_2D 0
 
 #include <vector>
 #include <iterator>
@@ -55,33 +54,16 @@ using std::back_insert_iterator;
 using std::back_inserter;
 
 struct ReconSample_t {
-  float distz;
+  float distz, depth;
   CameraSample sampl;
   Spectrum L, T;
   Intersection isect;
-#if REPROJ_2D
-  float reproj_x(float u, float v) const {
-    const float dxdu = isect.dg.dudx? 1.f/isect.dg.dudx : 0.f;
-    const float dxdv = isect.dg.dvdx? 1.f/isect.dg.dvdx : 0.f;
-    return sampl.imageX + (u - sampl.lensU)*dxdu + (v - sampl.lensV)*dxdv;
+  float reproj_x(float u) const {
+    return sampl.imageX + (u - sampl.lensU)*depth;
   }
-  float reproj_y(float u, float v) const {
-    const float dydu = isect.dg.dudy? 1.f/isect.dg.dudy : 0.f;
-    const float dydv = isect.dg.dvdy? 1.f/isect.dg.dvdy : 0.f;
-    return sampl.imageY + (u - sampl.lensU)*dydu + (v - sampl.lensV)*dydv;
+  float reproj_y(float v) const {
+    return sampl.imageY + (v - sampl.lensV)*depth;
   }
-#else
-  float reproj_x(float u, float) const {
-    return isect.dg.dudx?
-            (sampl.imageX + (u - sampl.lensU)/isect.dg.dudx)
-          : sampl.imageX;
-  }
-  float reproj_y(float, float v) const {
-    return isect.dg.dudy?
-            (sampl.imageY + (v - sampl.lensV)/isect.dg.dvdy)
-          : sampl.imageY;
-  }
-#endif
 };
 
 const int search_t_d {4};
@@ -114,21 +96,19 @@ struct search_t {
 #if PAUSE_LOOKUP
 printf("search (%f,%f) (%f,%f)\n", x, y, u, v);
 #endif
-//    for (int dy = -search_t_d; dy <= search_t_d; ++dy) {
-//      for (int dx = -search_t_d; dx <= search_t_d; ++dx) {
-    for (int dy = -y0; dy < max_y-y0; ++dy) {
-      for (int dx = -x0; dx < max_x-x0; ++dx) {
+    for (int dy = -search_t_d; dy <= search_t_d; ++dy) {
+      for (int dx = -search_t_d; dx <= search_t_d; ++dx) {
         if (0<=y0+dy && y0+dy<max_y && 0<=x0+dx && x0+dx<max_x) {
           for (auto psampl : sampls[y0+dy][x0+dx]) {
-            const float disty {y - psampl->reproj_y(u, v)}
-                      , distx {x - psampl->reproj_x(u, v)};
+            const float disty {y - psampl->reproj_y(v)}
+                      , distx {x - psampl->reproj_x(u)};
             if (distx*distx + disty*disty <= dist2) {
 #if PAUSE_LOOKUP
 printf("    (%f,%f) (%f,%f)\n",
   psampl->sampl.imageX, psampl->sampl.imageY,
   psampl->sampl.lensU, psampl->sampl.lensV);
 printf("    reproj (%f,%f) z=%f (%f)\n",
-  psampl->reproj_x(u,v), psampl->reproj_y(u,v), psampl->distz, psampl->isect.dg.p.z);
+  psampl->reproj_x(u), psampl->reproj_y(v), psampl->distz, psampl->isect.dg.p.z);
 #endif
               res.push_back(*psampl);
             }
@@ -237,7 +217,7 @@ void ReconRendererInit::Run() {
       PBRT_FINISHED_CAMERA_RAY_INTEGRATION(&rays[i], &samples[i], &Ls_a[i]);
 
       const Point p {(*WorldToCamera)(isects_a[i].dg.p)};
-      *samplit++ = {p.z, samples[i], Ls_a[i], Ts_a[i], isects_a[i]};
+      *samplit++ = {p.z, 1.f/p.z, samples[i], Ls_a[i], Ts_a[i], isects_a[i]};
     }
 
 #if SHOW_SAMPLE
@@ -312,45 +292,33 @@ bool ReconRendererTask::SameSurface(
   float u,
   float v)
 {
-  const float x1[4] = {
-    s1.reproj_x(u + delta, v + delta),
-    s1.reproj_x(u + delta, v - delta),
-    s1.reproj_x(u - delta, v + delta),
-    s1.reproj_x(u - delta, v - delta),
+  const float x1[2] = {
+    s1.reproj_x(u + delta),
+    s1.reproj_x(u - delta),
   };
-  const float x2[4] = {
-    s2.reproj_x(u + delta, v + delta),
-    s2.reproj_x(u + delta, v - delta),
-    s2.reproj_x(u - delta, v + delta),
-    s2.reproj_x(u - delta, v - delta),
+  const float x2[2] = {
+    s2.reproj_x(u + delta),
+    s2.reproj_x(u - delta),
   };
-  const float y1[4] = {
-    s1.reproj_y(u + delta, v + delta),
-    s1.reproj_y(u + delta, v - delta),
-    s1.reproj_y(u - delta, v + delta),
-    s1.reproj_y(u - delta, v - delta),
+  const float y1[2] = {
+    s1.reproj_y(v + delta),
+    s1.reproj_y(v - delta),
   };
-  const float y2[4] = {
-    s2.reproj_y(u + delta, v + delta),
-    s2.reproj_y(u + delta, v - delta),
-    s2.reproj_y(u - delta, v + delta),
-    s2.reproj_y(u - delta, v - delta),
+  const float y2[2] = {
+    s2.reproj_y(v + delta),
+    s2.reproj_y(v - delta),
   };
   const unsigned int xres =
        (x1[0]-x2[0] > 0)
-    | ((x1[1]-x2[1] > 0) << 1)
-    | ((x1[2]-x2[2] > 0) << 2)
-    | ((x1[3]-x2[3] > 0) << 3);
+    | ((x1[1]-x2[1] > 0) << 1);
   const unsigned int yres =
        (y1[0]-y2[0] > 0)
-    | ((y1[1]-y2[1] > 0) << 1)
-    | ((y1[2]-y2[2] > 0) << 2)
-    | ((y1[3]-y2[3] > 0) << 3);
-  static const bool consistent[16] = {
-    true,   // <=   <=   <=  <=
-    false, false, false, false, false, false, false,
-    false, false, false, false, false, false, false,
-    true    //  >    >    >   >
+    | ((y1[1]-y2[1] > 0) << 1);
+  static const bool consistent[4] = {
+    true,   // <=   <=
+    false,  // <=    >
+    false,  //  >   <=
+    true    //  >    >
   };
   return consistent[xres] && consistent[yres];
 }
@@ -439,14 +407,14 @@ for (const ReconSample_t& s : S) {
 printf("\n");
 #endif
           for (size_t a = 2; !found && a < S.size(); ++a) {
-            const float x0 = S[a].reproj_x(samples[i].lensU, samples[i].lensV)
-                      , y0 = S[a].reproj_y(samples[i].lensU, samples[i].lensV);
+            const float x0 = S[a].reproj_x(samples[i].lensU)
+                      , y0 = S[a].reproj_y(samples[i].lensV);
             for (size_t b = 1; !found && b < a; ++b) {
-              const float x1 = S[b].reproj_x(samples[i].lensU, samples[i].lensV)
-                        , y1 = S[b].reproj_y(samples[i].lensU, samples[i].lensV);
+              const float x1 = S[b].reproj_x(samples[i].lensU)
+                        , y1 = S[b].reproj_y(samples[i].lensV);
               for (size_t c = 0; !found && c < b; ++c) {
-                const float x2 = S[c].reproj_x(samples[i].lensU, samples[i].lensV)
-                          , y2 = S[c].reproj_y(samples[i].lensU, samples[i].lensV);
+                const float x2 = S[c].reproj_x(samples[i].lensU)
+                          , y2 = S[c].reproj_y(samples[i].lensV);
                 const int sgn0 = Cross(x1-x0, y1-y0, samples[i].imageX-x0, samples[i].imageY-y0) > 0
                         , sgn1 = Cross(x2-x1, y2-y1, samples[i].imageX-x1, samples[i].imageY-y1) > 0
                         , sgn2 = Cross(x0-x2, y0-y2, samples[i].imageX-x2, samples[i].imageY-y2) > 0;
