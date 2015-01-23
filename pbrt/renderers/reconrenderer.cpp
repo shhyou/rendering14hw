@@ -36,6 +36,7 @@
 #include <vector>
 #include <iterator>
 #include <algorithm>
+#include <pthread.h>
 
 // renderers/reconrenderer.cpp*
 #include "stdafx.h"
@@ -146,8 +147,9 @@ public:
                     ProgressReporter &pr, Sampler *ms, Sample *sam,
                     int nsamp_, int tn, int tc,
                     Transform* WorldToCamera_,
+                    pthread_mutex_t& mutex_,
                     back_insert_iterator<vector<ReconSample_t>>& samplit_)
-    : reporter(pr), WorldToCamera(WorldToCamera_), samplit(samplit_)
+    : reporter(pr), WorldToCamera(WorldToCamera_), mutex(mutex_), samplit(samplit_)
   {
     scene = sc; renderer = ren; camera = c; mainSampler = ms;
     origSample = sam; nsamp = nsamp_; taskNum = tn; taskCount = tc;
@@ -158,6 +160,7 @@ private:
   // ReconRendererInit Private Data
   ProgressReporter &reporter;
   Transform *WorldToCamera;
+  pthread_mutex_t& mutex;
   back_insert_iterator<vector<ReconSample_t>>& samplit;
   const Scene *scene;
   const Renderer *renderer;
@@ -220,10 +223,15 @@ void ReconRendererInit::Run() {
       }
       PBRT_FINISHED_CAMERA_RAY_INTEGRATION(&rays[i], &samples[i], &Ls_a[i]);
 
+    }
+
+    pthread_mutex_lock(&mutex);
+    for (int i = 0; i < sampleCount; ++i) {
       const Point p {(*WorldToCamera)(isects_a[i].dg.p)};
       *samplit++ = {p.z, 1.f/p.z, samples[i].imageX, samples[i].imageY,
                     samples[i].lensU, samples[i].lensV, Ls_a[i]};
     }
+    pthread_mutex_unlock(&mutex);
 
 #if SHOW_SAMPLE
     // Report sample results to _Sampler_, add contributions to image
@@ -538,6 +546,9 @@ void ReconRenderer::Render(const Scene *scene) {
   const int nTasks = RoundUpPow2(max(32 * NumSystemCores(), nPixels / (16*16)));
   ProgressReporter reporter(nTasks*2, "Rendering"); // XXX TODO FIXME
   {
+    pthread_mutex_t mutex;
+    pthread_mutex_init(&mutex, NULL);
+
     // Allocate and initialize _sample_
     Sample *sample = new Sample(impl->sampler, surfaceIntegrator,
                                 volumeIntegrator, scene);
@@ -548,10 +559,13 @@ void ReconRenderer::Render(const Scene *scene) {
                                                   nsamp,
                                                   nTasks-1-i, nTasks,
                                                   impl->WorldToCamera,
+                                                  mutex,
                                                   samplit));
     }
     EnqueueTasks(renderTasks);
     WaitForAllTasks();
+
+    pthread_mutex_destroy(&mutex);
     for (uint32_t i = 0; i < renderTasks.size(); ++i)
       delete renderTasks[i];
     delete sample;
