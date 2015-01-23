@@ -1,6 +1,7 @@
 \documentclass{article}
 \usepackage[margin=3.5cm]{geometry}
 \usepackage{graphicx}
+\usepackage{amsmath,amsfonts,amssymb}
 
 \begin{document}
 \title{Exploring Light-Field Reconstruction on Realistic Camera}
@@ -8,7 +9,7 @@
 \date{}
 \maketitle
 \section{Introduction}
-In the final project, I extends \textit{PBRT} with part of the system proposed in [1] and tested it together with the realistic camera module implemented in homework 2. The system utilizes the anisotropy in the light field, and reconstructs dense pixel ``samples" from the rather sparse input samples. The work is especially suitable for reconstructing defocus effects (and motion blur).
+In the final project, I extends \textit{PBRT} [2] with part of the system proposed in [1] and tested it together with the realistic camera module implemented in homework 2. The system utilizes the anisotropy in the light field, and reconstructs dense pixel ``samples" from the rather sparse input samples. The work is especially suitable for reconstructing defocus effects (and motion blur).
 
 In \textit{PBRT}, the \texttt{SamplerRenderer} renders the image by integrating over the 4D $xyuv$-hypercube, where $x,y$ denotes coordinate on the image plane and $u,v$ denote coordinate on the lens. The defocusing effect is then caused by multiple different intersection points contributing to a single pixel of the image.
 
@@ -40,21 +41,77 @@ In the proposed system, the anisotropy of sampling points are utilized to recons
 
 where $C_1$, $C_2$ are predetermined constants drawn using the thin-lens approximation. Then for any reconstruction location $(\hat{x},\hat{y})$ on the image plane and any sample position on the lens $(\hat{u},\hat{v})$, the algorithm first moves each sample at $(x,y)$, $(u,v)$ along its trajectory to the new $(x',y')$, $(\hat{u},\hat{v})$ location (i.e. to the same horizontal line on the $xu$-, $yv$-plane). Visible samples $(x',y')$ near the point $(\hat{x},\hat{y})$ are then filter together to produce the radiance of the sample $(\hat{x},\hat{y})$, $(\hat{u},\hat{v})$.
 
-The reconstruction technique is claimed to be applicable to a wider range other than defocus, such as motion blur and refocusing of the picture. I did not repeat those experiment, though.
+The reconstruction technique is claimed to be applicable to a wider range other than defocus, such as motion blur, soft shadows and refocusing of the picture. I did not repeat those experiment, though.
 
 \section{Algorithm and Implementation}
-The algorithm works by first render a coarse version of the image, then re-render the image using dense, reconstructed samples on the light field. Given a reconstruction location $(\hat{x},\hat{y})$, $(\hat{u},\hat{v})$,
+The algorithm works by first render a coarse version of the image, then re-render the image using dense, reconstructed samples on the light field. Given a reconstruction location $(\hat{x},\hat{y})$, $(\hat{u},\hat{v})$, the reconstructed radiance $R(\hat{x},\hat{y},\hat{u},\hat{v})$ is calculated by
 
 \begin{enumerate}
-\item 
+\item Reproject samples to the new positions using $(\hat{u},\hat{v})$. The formula is
+
+\[\begin{aligned}
+x^*(u) &= x + (u - \hat{u})\frac{\partial x}{\partial u} = x + (u - \hat{u})\left(\frac{C_1}{z} + C_2\right) \\
+y^*(v) &= y + (v - \hat{v})\frac{\partial y}{\partial v} = y + (v - \hat{v})\left(\frac{C_1}{z} + C_2\right) \\
+\end{aligned}\]
+
+\item Determine which (set of) reprojected samples are visible at the reconstruction location. The reprojected samples near $(\hat{x},\hat{y})$ with non-crossing trajectories are grouped together to form several surfaces. The samples in the up front surface are the visible ones.
+
+\item The visible samples are filtered together to form the reconstructed radiance.
 \end{enumerate}
 
+The reconstructed samples are then filtered through the pixel filter, $P$, to produce the actual radiance at coordinate $(\hat{x},\hat{y})$.
+
+\[ L(x,y) = \frac{1}{N}\sum_i R(x_i,y_i,u_i,v_i)P(x_i,x_j) \]
+
+It is possible to accelerate the algorithm by building a variant of bounding-volume hierarchy (BVH) data structure to aid the search of close reproject samples in step 2. I use a simple heuristic though, at the cost of lowering the quality of the image since defocussed points could move a long distance in the rendered image.
+
+My implementation of the reconstruction algorithm is modified from the \textit{SamplerRenderer} class presented in \textit{PBRT}. I copied the file \texttt{renderers/samplerrenderer.*} to \texttt{renderers/reconrenderer.*}, and add a new type of renderer in \texttt{core/api.cpp}.
+
+\begin{verbatim}
+Renderer *RenderOptions::MakeRenderer() const
+{
+        // ...
+        if (RendererName == "reconstructed")
+        {
+          Transform *pWorld2Camera;
+          transformCache.Lookup(WorldToCamera[0], &pWorld2Camera, NULL);
+          renderer = new ReconRenderer(sampler, camera, surfaceIntegrator,
+                                       volumeIntegrator, nsamp, pWorld2Camera);
+        }
+        // ...
+}
+\end{verbatim}
+
+Then in \texttt{ReconRenderer::Render(const Scene *scene)}, the renderer issued a two-stage rendering process with helper classes \texttt{ReconRendererInit} and \texttt{ReconRendererTask}. The \texttt{ReconRendererInit} performs the sampling process and radiance calculating, constructing all \texttt{ReconSample\_t} of the image. The class \texttt{ReconRendererTask} calculates a dense set of reconstructed samples, and render the final image.
+
+\begin{verbatim}
+struct ReconSample_t {
+  float distz, depth;
+  float imageX, imageY, lensU, lensV;
+  Spectrum L;
+  // some other methods
+}
+\end{verbatim}
+
+The \texttt{ReconRenderer} have several parameters. (The \# of reconstructed samples per pixel is set on the camera).
+
+\begin{itemize}
+  \item \texttt{"integer pixelsamples"}, the \# of input samples per pixel.
+  \item \texttt{"integer range"}, the range of input samples to search for.
+  \item \texttt{"float alpha"}, the $\alpha$ parameter of the Gaussian filter, used to filter visible samples.
+  \item \texttt{"float weight"}, the weight of the ray (to adjust brightness).
+  \item \texttt{"float C1"} and \texttt{"float C2"}, the constant $C_1$, $C_2$.
+\end{itemize}
+
 \section{Experiment and Discussion}
+The result is not quite satisfactory, though.
+
 \section{References}
 \begin{enumerate}
 \item Jaakko Lehtinen et al, \textit{Temporal Light Field Reconstruction for Rendering Distribution Effects}. Proceedings of ACM SIGGRAPH, 2011.
 \item Pharr, M., and Humphreys, G. 2010. \textit{Physically Based Rendering, 2nd ed}. Morgan Kauffmann.
 \item \textit{Scenes for PBRT}. \texttt{http://www.pbrt.org/scenes.php}
+
 \end{enumerate}
 \section*{Appendix A. Environment Setup and Compilation}
 \end{document}
