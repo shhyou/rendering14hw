@@ -55,19 +55,22 @@ using std::vector;
 using std::back_insert_iterator;
 using std::back_inserter;
 
+int search_t_d {4};
+float filter_alpha {1.f};
+float ray_weighting {4.f};
+float C1 {1.f}, C2 {0.f};
+
 struct ReconSample_t {
   float distz, depth;
   float imageX, imageY, lensU, lensV;
   Spectrum L;
   float reproj_x(float u) const {
-    return imageX + (u - lensU)*depth;
+    return imageX + C1*(u - lensU)*depth + C2;
   }
   float reproj_y(float v) const {
-    return imageY + (v - lensV)*depth;
+    return imageY + C1*(v - lensV)*depth + C2;
   }
 };
-
-const int search_t_d {4};
 
 struct search_t {
   int max_x, max_y;
@@ -372,7 +375,7 @@ void ReconRendererTask::Run() {
   Spectrum *Ts_a = new Spectrum[maxSamples];
   Intersection *isects_a = new Intersection[maxSamples];
 
-  const GaussianFilter filt(2.f/sqrt(nsamp), 2.f/sqrt(nsamp), 100.f);
+  const GaussianFilter filt(2.f/sqrt(nsamp), 2.f/sqrt(nsamp), filter_alpha);
 
   // Get samples from _Sampler_ and update image
   int sampleCount;
@@ -435,7 +438,7 @@ printf("\n");
         }
 //getchar();
         const vector<ReconSample_t>& S = it!=end(surfaces)? *it : surfaces.front();
-        Ls_a[i] = 0.f; // XXX TODO FIXME: add filter
+        Ls_a[i] = 0.f;
         Ts_a[i] = 0.f;
         for (const ReconSample_t& s : S) {
 #if RECON_FILTER
@@ -445,7 +448,7 @@ printf("\n");
           Ls_a[i] += s.L;
 #endif
         }
-        Ls_a[i] *= rayWeight;
+        Ls_a[i] *= rayWeight * ray_weighting;
       } else {
         Ls_a[i] = 0.f;
         Ts_a[i] = 1.f;

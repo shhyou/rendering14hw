@@ -1219,6 +1219,11 @@ Scene *RenderOptions::MakeScene() {
     return scene;
 }
 
+extern int search_t_d;
+extern float filter_alpha;
+extern float ray_weighting;
+extern float C1;
+extern float C2;
 
 Renderer *RenderOptions::MakeRenderer() const {
     Renderer *renderer = NULL;
@@ -1262,6 +1267,24 @@ Renderer *RenderOptions::MakeRenderer() const {
                     RendererName.c_str());
         bool visIds = RendererParams.FindOneBool("visualizeobjectids", false);
         int nsamp = RendererParams.FindOneInt("pixelsamples", 4);
+        int search_t_d_ = RendererParams.FindOneInt("range", -1);
+        float ray_weighting_ = RendererParams.FindOneFloat("weight", -1.f);
+        float filter_alpha_ = RendererParams.FindOneFloat("alpha", -1.f);
+        float C1_ = RendererParams.FindOneFloat("C1", -1.f);
+        float C2_ = RendererParams.FindOneFloat("C2", -1.f);
+
+        if (search_t_d_ > 0)
+            search_t_d = search_t_d_;
+
+        if (ray_weighting_ > 0)
+            ray_weighting = ray_weighting_;
+
+        if (filter_alpha_ > 0)
+            filter_alpha = filter_alpha_;
+
+        if (C1_ > 0) C1 = C1_;
+        if (C2_ > 0) C2 = C2_;
+
         RendererParams.ReportUnused();
         Sampler *sampler = MakeSampler(SamplerName, SamplerParams, camera->film, camera);
         if (!sampler) Severe("Unable to create sampler.");
