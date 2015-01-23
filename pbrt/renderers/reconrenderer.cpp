@@ -532,12 +532,12 @@ void ReconRenderer::Render(const Scene *scene) {
 
   // Create and launch _ReconRendererTask_s for rendering image
 
-  ProgressReporter reporter(1+RoundUpPow2(camera->film->xResolution * camera->film->yResolution / (16*16)), "Rendering"); // XXX TODO FIXME
   back_insert_iterator<vector<ReconSample_t>> samplit = back_inserter(impl->sampls);
+  // Compute number of _SamplerRendererTask_s to create for rendering
+  const int nPixels = camera->film->xResolution * camera->film->yResolution;
+  const int nTasks = RoundUpPow2(max(32 * NumSystemCores(), nPixels / (16*16)));
+  ProgressReporter reporter(nTasks*2, "Rendering"); // XXX TODO FIXME
   {
-    // No parallelization exists; we do the whole-image processing
-    const int nTasks = RoundUpPow2(1);
-
     // Allocate and initialize _sample_
     Sample *sample = new Sample(impl->sampler, surfaceIntegrator,
                                 volumeIntegrator, scene);
@@ -558,9 +558,6 @@ void ReconRenderer::Render(const Scene *scene) {
   }
   impl->searcher = new search_t(impl->sampls, nsamp);
   {
-    // Compute number of _SamplerRendererTask_s to create for rendering
-    const int nPixels = camera->film->xResolution * camera->film->yResolution;
-    const int nTasks = RoundUpPow2(max(32 * NumSystemCores(), nPixels / (16*16)));
     float delta = 1.0f/sqrt(nsamp);
 
     // Allocate and initialize _sample_
