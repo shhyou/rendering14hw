@@ -104,7 +104,46 @@ The \texttt{ReconRenderer} have several parameters. (The \# of reconstructed sam
 \end{itemize}
 
 \section{Experiment and Discussion}
-The result is not quite satisfactory, though.
+\begin{center}
+  \includegraphics[width=100pt,height=100pt]{./dof-dragons-dgauss-1-256-10-1-0.png}
+  \includegraphics[width=100pt,height=100pt]{./dof-dragons-dgauss-4-256-10-1-0.png}
+  \includegraphics[width=100pt,height=100pt]{./dof-dragons-dgauss-16-256-10-1-0.png}
+  \includegraphics[width=100pt,height=100pt]{./dof-dragons-dgauss-64-256-10-1-0.png}
+
+  \small{Figure 4. Reconstruction with Various Number of Input Samples. The images are rendered with  1, 4, 16 and 64 input samples from left to right, respectively}
+\end{center}
+
+The result is not quite satisfactory, though. I have experimented rendering images in homework 2 with various number of input samples as in Figure 4. All images have 256 reconstruction locations (per pixel). Compared to the ground truth, though the image contains less fractal, the black ``holes" still exist and the results are not acceptable. The result of other images in homework 2 are given in Figure 5.
+
+\begin{center}
+  \includegraphics[width=120pt,height=120pt]{./dof-dragons-fisheye-64-256-10-1-0.png}
+  \includegraphics[width=120pt,height=120pt]{./dof-dragons-telephoto-64-256-10-1-0.png}
+  \includegraphics[width=120pt,height=120pt]{./dof-dragons-wide-64-256-10-1-0.png}
+
+  \small{Figure 5. Reconstruction Result. All images are rendered witn 64 input samples and 256 reconstructed samples.}
+\end{center}
+
+However, in some cases the image can have a relatively good result compared to its original input samples. In Figure 6, the two images are the raw input samples and the reconstructed result, respectively. There are 4 input samples per pixel and 256 reconstructed samples. Interestingly, the images grow darker as the number of input samples increases.
+
+\begin{center}
+  \includegraphics[width=150pt,height=150pt]{./MLD-7-07-4.png} (a)
+  \includegraphics[width=150pt,height=150pt]{./MLD-7-07-4-256-10-1-0.png} (b) \;\;\;\;
+
+  \small{Figure 6. Reconstruction from Relatively Low Resolution.}
+\end{center}
+
+I also tried to render the realistic \texttt{dof-dragons.pbrt} taken from [3]. The result is shown in Figure 7. Though it looks better than the above ones, there are still non-negligible differences between the rendered image and the ground truth. Nevertheless, the rendering time is less than the original \textit{PBRT}. The paper [1] has given a much compelling speed-up using BVH and GPU.
+
+\clearpage
+
+\begin{center}
+
+  \includegraphics[width=400pt,height=169.6pt]{./dof-dragons-orig-256.png} \small{(a)}
+
+  \includegraphics[width=400pt,height=169.6pt]{./real-dragons-16-256-10-1-0.png} \small{(b)}
+
+  \small{Figure 7. Experiment Result. (a) is rendered with 256 samples by \texttt{SamplerRenderer} in 9403.1s (b) is reconstructed from 16 samples in 4066.8s.}
+\end{center}
 
 \section{References}
 \begin{enumerate}
@@ -114,4 +153,6 @@ The result is not quite satisfactory, though.
 
 \end{enumerate}
 \section*{Appendix A. Environment Setup and Compilation}
+My code compiles both on Windows (with MinGW) and Linux (CSIE Workstation). However, the \texttt{Makefile} and several codes have been patched in order to enable C++11 features. Please see the accompanying patch. To compile the code, just go to the root directory of the source files and type \texttt{make pbrt}.
+
 \end{document}
